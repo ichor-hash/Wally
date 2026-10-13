@@ -219,58 +219,6 @@ os.unlink(temp_path)
 - Medium dataset (10K chunks): 1-2 seconds
 - Large dataset (100K+ chunks): 2-3 seconds
 
-## What I'd Change If I Built This Again
-
-**1. Use PostgreSQL with pgvector for simpler deployment**
-
-Qdrant is great, but adding Docker + a separate service is overhead. pgvector lets you store vectors directly in Postgres. One less thing to manage.
-
-**2. Add reranking**
-
-Right now, I take the top 5 chunks from Qdrant and feed them all to the LLM. A reranker (like `cross-encoder/ms-marco-MiniLM-L-12-v2`) would score those 5 again with the actual query and reorder them. Better context = better answers.
-
-**3. Implement hybrid search**
-
-Pure vector search misses exact keyword matches sometimes. Combining vector search (semantic) with BM25 (keyword) gives you both. Qdrant supports this, I just haven't wired it up yet.
-
-**4. Add caching**
-
-Same question twice? Why compute it twice? A Redis cache in front of the LLM would save 80% of repeated queries.
-
-**5. Stream the LLM response**
-
-Right now, you wait for the full answer. Streaming it token-by-token (like ChatGPT) feels more responsive. FastAPI + Streamlit both support SSE (Server-Sent Events) for this.
-
-## The Tech Stack Summary
-
-| Component | Choice | Why |
-|-----------|--------|-----|
-| **Embeddings** | sentence-transformers/all-MiniLM-L6-v2 | Free, local, fast, 384 dims |
-| **Vector DB** | Qdrant | HNSW indexing, Docker-friendly, cosine support |
-| **LLM** | Groq (openai/gpt-oss-20b) | Free tier, 1000 T/s, good quality |
-| **PDF Parsing** | LlamaIndex PDFReader | Handles messy PDFs well |
-| **Chunking** | LlamaIndex SentenceSplitter | Sentence-aware, configurable overlap |
-| **Backend** | FastAPI | Fast, auto-docs, async support |
-| **Frontend** | Streamlit | 100 lines of Python = full UI |
-| **Language** | Python 3.11+ | Ecosystem support |
-
-## Key Metrics to Watch in Production
-
-**Accuracy Metrics:**
-- **Top-1 Recall**: Is the best chunk in the top 1 result? (aim for 70%+)
-- **Top-5 Recall**: Is the best chunk in the top 5? (aim for 90%+)
-- **Answer Relevance**: Manual eval, does the LLM answer actually address the question?
-
-**Performance Metrics:**
-- **Search Latency**: p50, p95, p99 (should be < 100ms for p95)
-- **LLM Latency**: Usually 500-2000ms depending on response length
-- **Embedding Throughput**: Chunks/second during bulk ingestion
-
-**Cost Metrics:**
-- **Vector Storage**: ~1.5KB per chunk (384 dims × 4 bytes)
-- **API Calls**: Groq free tier = 250K TPM (very generous)
-- **Compute**: Embedding CPU costs if self-hosting
-
 ## System Limits & Maximum Capabilities
 
 This is where we get real about what this thing can handle. Every system has a ceiling, and it's better you know it upfront than find out during a critical moment.
@@ -395,6 +343,241 @@ The LLM gets: System prompt + Context + Your question
 **Problem: Hallucination killing your use case?**  
 → Use smaller chunks, higher similarity thresholds, or switch to a bigger LLM
 
+## Current Limitations
+
+This is a single-machine local deployment. Here's what's not production-ready:
+
+### Local-Only Limitations
+
+- **No cloud deployment** - Requires Docker Desktop which doesn't exist in cloud
+- **Single instance** - One Streamlit app, one FastAPI server, one Qdrant instance
+- **No scalability** - Can't handle 1000 concurrent users
+- **No persistence** - Qdrant data lives in your Docker container (lost on restart)
+- **No redundancy** - Everything fails if your machine restarts
+- **No backups** - No automatic data backups
+- **No monitoring** - Can't see what's happening in production
+- **No CI/CD** - No automated testing or deployment
+
+### Performance Limitations
+
+- **Search latency** - 1-3 seconds (network overhead)
+- **Cold start** - First question takes 2-5 seconds (model loading)
+- **Memory hungry** - Embedding model uses ~1GB RAM
+- **CPU bound** - Local embeddings peg your CPU
+
+### Cost Limitations
+
+- **Free tier is fragile** - Groq may change terms, close free tier
+- **No SLA** - No guarantee of uptime or performance
+- **Limited to 50 concurrent users** - Groq rate limits kick in
+- **Storage on local disk** - No cloud backup
+
+### Data & Security Limitations
+
+- **No authentication** - Anyone with network access can query/upload
+- **No rate limiting** - Someone could spam your instance
+- **No encryption** - Data passes unencrypted locally
+- **No audit logs** - Can't see who accessed what
+- **Exposed API keys** - `.env` file is human-readable
+
+### Feature Limitations
+
+- **No reranking** - Can't re-score search results
+- **No hybrid search** - Only vector, no keyword fallback
+- **No caching** - Repeated queries hit the LLM every time
+- **No webhooks** - Can't automate uploads
+- **No scheduled tasks** - Can't schedule document ingestion
+- **No multi-tenancy** - Can't serve multiple organizations
+
+## Deployment Guide
+
+### Local Deployment (What This Is)
+
+You're running everything on your machine:
+- **Qdrant** runs in Docker Desktop (local container)
+- **FastAPI** runs in your terminal
+- **Streamlit** runs in your browser
+- Perfect for: Single user, testing, development, small datasets
+
+### Cloud Deployment (Scaling Up)
+
+If you want to run this in the cloud (AWS, GCP, Heroku, etc.), you need to understand what needs to move:
+
+**Problem:** Docker Desktop won't work in cloud. You need cloud-native alternatives.
+
+**Solution 1: Containerized Cloud (Easiest)**
+
+Package everything in Docker and deploy to:
+- **AWS ECS/Fargate** - Managed Docker containers
+- **Google Cloud Run** - Serverless containers
+- **DigitalOcean App Platform** - Simple container hosting
+
+Steps:
+1. Create `Dockerfile` for FastAPI + Streamlit
+2. Use **Managed Qdrant Cloud** instead of Docker (https://qdrant.to/cloud)
+3. Push to container registry (Docker Hub, AWS ECR, GCP Container Registry)
+4. Deploy to cloud platform
+
+Cost: $10-100/month depending on usage
+
+**Solution 2: Serverless (Most Scalable)**
+
+- **AWS Lambda** for FastAPI (using Mangum)
+- **Cloud Functions** (GCP) for FastAPI
+- **Vercel** for Streamlit (via custom server)
+- **Managed Vector DB** (Qdrant Cloud, Pinecone, Weaviate Cloud)
+
+Cost: Pay-as-you-go, ~$5-50/month for low traffic
+
+**Solution 3: Kubernetes (Most Complex)**
+
+If you need enterprise-grade:
+- Deploy on **AWS EKS**, **GCP GKE**, or **Azure AKS**
+- Use **Helm charts** for Qdrant, FastAPI, Streamlit
+- Auto-scaling, load balancing, monitoring included
+- Cost: $50-500+/month
+
+### Step-by-Step: Deploy to AWS Fargate (Recommended for Beginners)
+
+**1. Create Dockerfile:**
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy code
+COPY . .
+
+# Expose ports
+EXPOSE 8001 8501
+
+# Run both services
+CMD ["bash", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port 8001 & streamlit run app.py --server.port 8501 --server.address 0.0.0.0"]
+```
+
+**2. Set up Qdrant Cloud:**
+- Sign up at https://qdrant.to/cloud
+- Create a free/paid cluster
+- Get API key and URL
+- Update `vector_db.py` to use cloud endpoint
+
+**3. Push to AWS:**
+```bash
+# Create ECR repository
+aws ecr create-repository --repository-name wally
+
+# Build and push
+docker build -t wally .
+docker tag wally:latest <your-aws-account>.dkr.ecr.us-east-1.amazonaws.com/wally:latest
+docker push <your-aws-account>.dkr.ecr.us-east-1.amazonaws.com/wally:latest
+
+# Deploy to Fargate via AWS Console or CLI
+```
+
+**4. Environment Variables in Cloud:**
+```env
+GROQ_API_KEY=your_key
+QDRANT_URL=https://your-qdrant-cloud.io
+QDRANT_API_KEY=your_qdrant_key
+```
+
+### What You Need to Change for Cloud
+
+1. **Replace Qdrant Docker with Qdrant Cloud**
+   ```python
+   # Instead of: QdrantClient(url="http://localhost:6333")
+   qdrant = QdrantClient(
+       url="https://your-cluster.qdrant.io",
+       api_key="your_api_key"
+   )
+   ```
+
+2. **Add authentication to FastAPI**
+   ```python
+   from fastapi.security import HTTPBearer
+   
+   security = HTTPBearer()
+   
+   @app.post("/search")
+   async def search(request: SearchRequest, credentials: HTTPAuthCredentials = Depends(security)):
+       # Verify token
+       pass
+   ```
+
+3. **Add rate limiting**
+   ```python
+   from slowapi import Limiter
+   
+   limiter = Limiter(key_func=get_remote_address)
+   
+   @app.post("/search")
+   @limiter.limit("100/minute")
+   async def search(request: SearchRequest):
+       pass
+   ```
+
+4. **Add caching**
+   ```python
+   from redis import Redis
+   
+   cache = Redis(host="localhost", port=6379)
+   
+   # Cache search results
+   ```
+
+5. **Add monitoring**
+   - Use **Datadog**, **New Relic**, or **CloudWatch**
+   - Track: API latency, error rates, token usage, storage size
+
+### Recommendation
+
+**For 2026:**
+- **Small team (< 10 users):** Deploy to Heroku or Railway with Qdrant Cloud ($50-100/month)
+- **Growing startup (10-100 users):** AWS Fargate + Qdrant Cloud + CloudFront CDN ($100-300/month)
+- **Enterprise:** Kubernetes on AWS/GCP with managed services ($500+/month)
+
+The current setup is "local-only" by design. Moving to cloud requires careful thought about:
+- Data persistence
+- Scalability
+- Cost efficiency
+- Security
+- Monitoring
+
+Don't just "lift and shift" to cloud. Architect for it from the start if that's your plan.
+
+## What I'd Change If I Built This Again
+
+**1. Use PostgreSQL with pgvector for simpler deployment**
+
+Qdrant is great, but adding Docker + a separate service is overhead. pgvector lets you store vectors directly in Postgres. One less thing to manage.
+
+**2. Add reranking**
+
+Right now, I take the top 5 chunks from Qdrant and feed them all to the LLM. A reranker (like `cross-encoder/ms-marco-MiniLM-L-12-v2`) would score those 5 again with the actual query and reorder them. Better context = better answers.
+
+**3. Implement hybrid search**
+
+Pure vector search misses exact keyword matches sometimes. Combining vector search (semantic) with BM25 (keyword) gives you both. Qdrant supports this, I just haven't wired it up yet.
+
+**4. Add caching**
+
+Same question twice? Why compute it twice? A Redis cache in front of the LLM would save 80% of repeated queries.
+
+**5. Stream the LLM response**
+
+Right now, you wait for the full answer. Streaming it token-by-token (like ChatGPT) feels more responsive. FastAPI + Streamlit both support SSE (Server-Sent Events) for this.
+
+## Final Thoughts
+
+RAG isn't magic. It's just really good information retrieval + a language model that can synthesize. The hard part isn't the ML, it's the engineering: handling PDFs, managing vectors, tuning chunk sizes, picking the right similarity threshold, and making it all fast enough that users don't leave.
+
+This system works. It's not perfect, but it's free, fast, and doesn't hallucinate because everything is grounded in your documents. That's the whole point.
+
 Now go build something.
 
 ---
@@ -407,7 +590,8 @@ Now go build something.
 - HuggingFace Transformers (embeddings)
 - Groq API (LLM)
 - LlamaIndex (PDF parsing + chunking)
+- Inngest (event scheduling, optional)
 
-**GitHub:** [Your repo here]  
-**Demo:** [Your demo link here]  
-**Contact:** [Your contact here]
+**Status:** Production-ready for small to medium datasets (< 100K chunks), local deployment only  
+**Last Updated:** October 2026  
+**Next Steps:** Cloud deployment guide, add reranking, hybrid search, caching, monitoring

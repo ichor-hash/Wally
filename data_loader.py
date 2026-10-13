@@ -177,22 +177,24 @@ class DocumentLoader:
     def chunk_documents(self, documents: List[Document]) -> List[Document]:
         """
         Split documents into chunks using sentence splitting.
+        Preserves metadata including source_file.
         
         Args:
             documents: List of LlamaIndex Documents
             
         Returns:
-            List of chunked Documents
+            List of chunked Documents with preserved metadata
         """
         # The SentenceSplitter handles sentence-aware splitting
         nodes = self.get_nodes(documents)
         
-        # Convert nodes back to documents
+        # Convert nodes back to documents, preserving all metadata
         chunks = []
         for node in nodes:
+            # Create new document with node text
             doc = Document(
                 text=node.text,
-                metadata={**node.metadata}
+                metadata={**node.metadata}  # Preserve all metadata from node
             )
             chunks.append(doc)
         

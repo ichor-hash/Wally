@@ -17,8 +17,11 @@ It's basically semantic search + text generation. Simple, but it works.
 
 ### Requirements
 - Python 3.11+
-- Docker (for Qdrant vector database)
+- Docker Desktop (for Qdrant vector database)
 - ~2GB free disk space
+
+**Why Docker Desktop?**  
+Qdrant (the vector database) runs as a containerized service. Docker Desktop manages this container, ensuring consistent performance across machines. It's like a lightweight VM for databases. On Windows/Mac, Docker Desktop is the easiest way to run Qdrant without manual setup.
 
 ### Installation
 
@@ -42,14 +45,21 @@ echo "GROQ_API_KEY=your_key_here" > .env
 
 ### Start the System
 
+**1. Start Docker Desktop** (if not already running)  
+Open Docker Desktop application.
+
+**2. Start Qdrant** (new terminal)
 ```bash
-# Start Qdrant (vector database)
 docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
+```
 
-# Start FastAPI backend (new terminal)
+**3. Start FastAPI backend** (new terminal)
+```bash
 python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+```
 
-# Start Streamlit frontend (new terminal)
+**4. Start Streamlit frontend** (new terminal)
+```bash
 streamlit run app.py
 ```
 

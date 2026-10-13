@@ -1,10 +1,9 @@
 """
 Production RAG System - Streamlit Frontend
-Warm linen aesthetic with figtree typography.
+Clean, minimal interface with Figtree typography.
 """
 import streamlit as st
 import requests
-import json
 from pathlib import Path
 
 # ============================================================
@@ -14,12 +13,11 @@ API_URL = "http://localhost:8001"
 
 st.set_page_config(
     page_title="Wally - RAG Chat",
-    page_icon="�",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Warm linen theme with figtree font
+# Apply Figtree font globally
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap');
@@ -27,126 +25,12 @@ st.markdown("""
 * {
     font-family: 'Figtree', sans-serif !important;
 }
-
-:root {
-    --warm-white: #f5ece0;
-    --linen: #ede4d3;
-    --warm-tan: #dcc8b6;
-    --accent-brown: #8b7355;
-    --accent-gold: #d4a574;
-}
-
-body, [data-testid="stAppViewContainer"] {
-    background-color: #f5ece0 !important;
-    color: #3a3a3a !important;
-}
-
-[data-testid="stMain"] {
-    background-color: #f5ece0 !important;
-}
-
-h1, h2, h3, h4, h5, h6 {
-    color: #5a4a3a !important;
-    font-weight: 600 !important;
-}
-
-.stButton > button {
-    background: linear-gradient(135deg, #d4a574 0%, #c19563 100%) !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    transition: all 0.3s ease !important;
-}
-
-.stButton > button:hover {
-    background: linear-gradient(135deg, #c19563 0%, #b08552 100%) !important;
-    box-shadow: 0 4px 12px rgba(212, 165, 116, 0.3) !important;
-}
-
-.stTextInput > div > div > input {
-    background-color: #fff !important;
-    border: 2px solid #dcc8b6 !important;
-    border-radius: 8px !important;
-    color: #3a3a3a !important;
-    font-family: 'Figtree', sans-serif !important;
-}
-
-.stTextInput > div > div > input:focus {
-    border-color: #d4a574 !important;
-    box-shadow: 0 0 0 2px rgba(212, 165, 116, 0.1) !important;
-}
-
-[data-testid="stTabs"] [role="tablist"] button {
-    color: #5a4a3a !important;
-    font-weight: 600 !important;
-    background: transparent !important;
-    border-bottom: 3px solid transparent !important;
-    border-radius: 0 !important;
-}
-
-[data-testid="stTabs"] [role="tablist"] button[aria-selected="true"] {
-    border-bottom: 3px solid #d4a574 !important;
-    color: #d4a574 !important;
-}
-
-.stExpander {
-    background-color: #fff !important;
-    border: 1px solid #dcc8b6 !important;
-    border-radius: 8px !important;
-}
-
-[data-testid="stExpanderDetails"] {
-    background-color: #faf7f2 !important;
-}
-
-.stMetric {
-    background-color: #fff !important;
-    padding: 16px !important;
-    border-radius: 8px !important;
-    border: 1px solid #dcc8b6 !important;
-}
-
-.success {
-    background-color: #e8f5e9 !important;
-    border: 1px solid #81c784 !important;
-    border-radius: 8px !important;
-    padding: 12px !important;
-    color: #2e7d32 !important;
-}
-
-.error {
-    background-color: #ffebee !important;
-    border: 1px solid #e57373 !important;
-    border-radius: 8px !important;
-    padding: 12px !important;
-    color: #c62828 !important;
-}
-
-.info-box {
-    background-color: #fff !important;
-    border-left: 4px solid #d4a574 !important;
-    padding: 16px !important;
-    border-radius: 4px !important;
-    margin: 16px 0 !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
-
-@st.cache_resource
-def get_storage_info():
-    """Fetch storage info from API"""
-    try:
-        response = requests.get(f"{API_URL}/health", timeout=5)
-        if response.status_code == 200:
-            return response.json()
-    except:
-        pass
-    return None
 
 @st.cache_data(ttl=5)
 def get_stored_documents():
@@ -158,6 +42,17 @@ def get_stored_documents():
     except:
         pass
     return {"documents": []}
+
+@st.cache_data(ttl=10)
+def get_health_info():
+    """Fetch system health info"""
+    try:
+        response = requests.get(f"{API_URL}/health", timeout=5)
+        if response.status_code == 200:
+            return response.json()
+    except:
+        pass
+    return None
 
 def delete_document(doc_id):
     """Delete a document and its chunks"""
@@ -174,21 +69,22 @@ def delete_document(doc_id):
 # ============================================================
 # HEADER
 # ============================================================
-st.markdown("<div style='text-align: center; padding: 20px 0;'><h1 style='color: #5a4a3a;'>📚 Wally</h1><p style='color: #8b7355; font-size: 16px; font-weight: 500;'>Your documents, smarter. Ask anything.</p></div>", unsafe_allow_html=True)
+st.title("Wally")
+st.caption("Your documents, smarter. Ask anything.")
 
 # ============================================================
 # TABS
 # ============================================================
-tab1, tab2 = st.tabs(["💬 Ask Questions", "📤 Upload Documents"])
+tab1, tab2 = st.tabs(["Ask Questions", "Ingest Documents"])
 
 # ============================================================
 # TAB 1: CHAT & STORAGE VIEW
 # ============================================================
 with tab1:
-    st.markdown("---")
+    st.divider()
     
     # Show current storage
-    st.subheader("📖 Your Knowledge Base")
+    st.subheader("Knowledge Base")
     
     try:
         docs_data = get_stored_documents()
@@ -198,16 +94,14 @@ with tab1:
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("📄 Documents", len(set(d.get("source_file") for d in documents)))
+                st.metric("Documents", len(set(d.get("source_file") for d in documents)))
             with col2:
-                st.metric("📑 Chunks", len(documents))
+                st.metric("Chunks", len(documents))
             with col3:
-                st.metric("💾 Storage Size", f"~{len(documents) * 1.5:.1f} KB")
+                st.metric("Storage Size", f"~{len(documents) * 1.5:.1f} KB")
             
             # List documents with delete option
             st.markdown("**Uploaded Files:**")
-            
-            col1, col2, col3 = st.columns([3, 1, 1])
             
             unique_files = {}
             for doc in documents:
@@ -217,12 +111,13 @@ with tab1:
                 unique_files[fname]["count"] += 1
             
             for idx, (fname, info) in enumerate(unique_files.items()):
+                col1, col2, col3 = st.columns([3, 1, 1])
                 with col1:
-                    st.caption(f"📄 {fname}")
+                    st.caption(f"{fname}")
                 with col2:
                     st.caption(f"{info['count']} chunks")
                 with col3:
-                    if st.button("🗑️", key=f"del_{idx}", help="Delete this document"):
+                    if st.button("Delete", key=f"del_{idx}", help="Delete this document"):
                         success, msg = delete_document(fname)
                         if success:
                             st.success(msg)
@@ -230,15 +125,15 @@ with tab1:
                         else:
                             st.error(msg)
         else:
-            st.info("📭 No documents uploaded yet. Start by uploading files in the 'Upload Documents' tab.")
+            st.info("No documents uploaded yet. Start by uploading files in the Ingest Documents tab.")
     
     except Exception as e:
         st.error(f"Could not load storage info: {str(e)}")
     
-    st.markdown("---")
+    st.divider()
     
     # Chat interface
-    st.subheader("💬 Ask a Question")
+    st.subheader("Ask a Question")
     
     col1, col2 = st.columns([4, 1])
     
@@ -258,12 +153,12 @@ with tab1:
             label_visibility="collapsed"
         )
     
-    # Search button with enter key support
-    search_button = st.button("🔍 Search", type="primary", use_container_width=False)
+    # Search button
+    search_button = st.button("Search", type="primary", use_container_width=False)
     
-    if search_button or query:
-        if query and search_button:
-            with st.spinner("🔍 Searching your documents..."):
+    if search_button:
+        if query:
+            with st.spinner("Searching your documents..."):
                 try:
                     response = requests.post(
                         f"{API_URL}/search",
@@ -275,41 +170,43 @@ with tab1:
                         result = response.json()
                         
                         # Display answer
-                        st.markdown("---")
-                        st.markdown("### ✨ Answer")
-                        st.markdown(f"<div style='background-color: #fff; padding: 16px; border-radius: 8px; border-left: 4px solid #d4a574;'>{result.get('answer', 'No answer found.')}</div>", unsafe_allow_html=True)
+                        st.divider()
+                        st.subheader("Answer")
+                        st.write(result.get('answer', 'No answer found.'))
                         
                         # Display sources
                         if result.get("sources"):
-                            st.markdown("### 📚 Sources")
+                            st.subheader("Sources")
                             for i, src in enumerate(result["sources"], 1):
                                 score = src.get("score", 0)
                                 text = src.get("text", "")[:250]
-                                relevance = "🟢 High" if score > 0.8 else "🟡 Medium" if score > 0.6 else "🔴 Low"
+                                relevance = "High" if score > 0.8 else "Medium" if score > 0.6 else "Low"
                                 
-                                with st.expander(f"{relevance} · Source {i} (similarity: {score:.2%})", expanded=(i==1)):
+                                with st.expander(f"Source {i} - {relevance} relevance (similarity: {score:.2%})", expanded=(i==1)):
                                     st.write(text + "...")
                     else:
-                        st.error(f"❌ API Error: {response.status_code}")
+                        st.error(f"API Error: {response.status_code}")
                         if response.text:
                             st.code(response.text)
                 
                 except requests.exceptions.ConnectionError:
-                    st.error("❌ Cannot connect to API. Ensure FastAPI server is running on port 8001.")
+                    st.error("Cannot connect to API. Ensure FastAPI server is running on port 8001.")
                 except requests.exceptions.Timeout:
-                    st.error("⏱️ Request timed out. Try with fewer results or a shorter question.")
+                    st.error("Request timed out. Try with fewer results or a shorter question.")
                 except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                    st.error(f"Error: {str(e)}")
+        else:
+            st.warning("Please enter a question.")
 
 # ============================================================
-# TAB 2: UPLOAD DOCUMENTS
+# TAB 2: INGEST DOCUMENTS
 # ============================================================
 with tab2:
-    st.markdown("---")
-    st.subheader("📤 Upload Documents")
+    st.divider()
+    st.subheader("Ingest Documents")
     st.caption("Supported formats: PDF, TXT, Markdown")
     
-    st.markdown("---")
+    st.divider()
     
     # File uploader
     uploaded_file = st.file_uploader(
@@ -320,68 +217,135 @@ with tab2:
     )
     
     if uploaded_file:
-        col1, col2 = st.columns([2, 1])
+        st.info(f"File: `{uploaded_file.name}` ({uploaded_file.size / 1024:.1f} KB)")
         
-        with col1:
-            st.info(f"📄 File: `{uploaded_file.name}` ({uploaded_file.size / 1024:.1f} KB)")
-        
-        with col2:
-            if st.button("📤 Upload", type="primary", use_container_width=True):
-                with st.spinner("🔄 Processing and storing..."):
-                    try:
-                        # Determine content type
-                        content_type = "application/pdf" if uploaded_file.name.endswith('.pdf') else "text/plain"
-                        files = {"file": (uploaded_file.name, uploaded_file.getvalue(), content_type)}
-                        
-                        response = requests.post(
-                            f"{API_URL}/ingest/pdf",
-                            files=files,
-                            timeout=120
-                        )
-                        
-                        if response.status_code == 200:
-                            result = response.json()
-                            chunks = result.get('chunks', 0)
-                            st.success(f"✅ Successfully ingested **{chunks} chunks** from `{uploaded_file.name}`")
-                            st.cache_data.clear()
-                            st.balloons()
-                            
-                            # Show chunk preview
-                            with st.expander("📊 Storage Details"):
-                                st.json({
-                                    "file": result.get("file"),
-                                    "chunks_created": chunks,
-                                    "chunk_ids_sample": result.get("ids", [])[:3]
-                                })
-                        else:
-                            st.error(f"❌ Upload failed: {response.status_code}")
-                            if response.text:
-                                st.code(response.text, language="json")
+        if st.button("Upload", type="primary", use_container_width=True):
+            with st.spinner("Processing and storing..."):
+                try:
+                    # Determine content type
+                    content_type = "application/pdf" if uploaded_file.name.endswith('.pdf') else "text/plain"
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), content_type)}
                     
-                    except requests.exceptions.ConnectionError:
-                        st.error("❌ Cannot connect to API. Ensure FastAPI server is running on port 8001.")
-                    except requests.exceptions.Timeout:
-                        st.error("⏱️ Upload timed out. File may be too large.")
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
+                    response = requests.post(
+                        f"{API_URL}/ingest/pdf",
+                        files=files,
+                        timeout=120
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        chunks = result.get('chunks', 0)
+                        st.success(f"Successfully ingested {chunks} chunks from `{uploaded_file.name}`")
+                        st.cache_data.clear()
+                        st.balloons()
+                        
+                        # Show chunk preview
+                        with st.expander("Storage Details"):
+                            st.json({
+                                "file": result.get("file"),
+                                "chunks_created": chunks,
+                                "chunk_ids_sample": result.get("ids", [])[:3]
+                            })
+                    else:
+                        st.error(f"Upload failed: {response.status_code}")
+                        if response.text:
+                            st.code(response.text, language="json")
+                
+                except requests.exceptions.ConnectionError:
+                    st.error("Cannot connect to API. Ensure FastAPI server is running on port 8001.")
+                except requests.exceptions.Timeout:
+                    st.error("Upload timed out. File may be too large.")
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
     
     else:
-        st.info("👆 Select a file to upload. Drag and drop or click to browse.")
+        st.info("Select a file to upload. Drag and drop or click to browse.")
     
-    # System info
-    st.markdown("---")
-    st.markdown("### ℹ️ System Info")
+    # System Architecture section
+    st.divider()
+    st.subheader("System Architecture")
     
-    try:
-        health = requests.get(f"{API_URL}/health", timeout=5).json()
-        col1, col2, col3 = st.columns(3)
+    health = get_health_info()
+    
+    if health:
+        try:
+            # Processing pipeline
+            st.markdown("**Processing Pipeline:**")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                embedding_model = health.get("embedding_model", "Unknown").split("/")[-1]
+                st.metric("Embeddings", embedding_model)
+            with col2:
+                st.metric("Vector DB", "Qdrant")
+            with col3:
+                llm_model = health.get("llm_model", "Unknown").split("/")[-1]
+                st.metric("LLM", llm_model)
+            with col4:
+                st.metric("Dimension", f"{health.get('dimension', '?')}D")
+            
+            st.divider()
+            
+            # Tech stack
+            st.markdown("**Technology Stack:**")
+            tech_info = {
+                "PDF Processing": "LlamaIndex",
+                "Text Embedding": health.get("embedding_provider", "Unknown"),
+                "Vector Storage": "Qdrant (HNSW indexing)",
+                "Vector Search": "Cosine Similarity",
+                "LLM Provider": "Groq API",
+                "Backend": "FastAPI + Uvicorn",
+                "Frontend": "Streamlit",
+                "Event Scheduling": "Inngest",
+                "Chunking": "LlamaIndex SentenceSplitter"
+            }
+            
+            col1, col2 = st.columns(2)
+            
+            items = list(tech_info.items())
+            for i, (key, value) in enumerate(items):
+                if i % 2 == 0:
+                    with col1:
+                        st.caption(f"**{key}:** {value}")
+                else:
+                    with col2:
+                        st.caption(f"**{key}:** {value}")
         
-        with col1:
-            st.metric("🧠 Embeddings", health.get("embedding_model", "Unknown").split("/")[-1])
-        with col2:
-            st.metric("⚡ LLM", health.get("llm_model", "Unknown").split("/")[-1])
-        with col3:
-            st.metric("📊 Dimension", f"{health.get('dimension', '?')}D")
+        except Exception as e:
+            st.error(f"Error displaying system info: {str(e)}")
     
-    except:
-        st.warning("Could not fetch system info.")
+    else:
+        with st.expander("System Architecture (Click to expand)", expanded=False):
+            st.warning("Cannot fetch live system info, but here's the architecture:")
+            
+            st.markdown("**Processing Pipeline:**")
+            st.caption("Embeddings: HuggingFace")
+            st.caption("Vector DB: Qdrant")
+            st.caption("LLM: Groq API")
+            st.caption("Dimension: 384D")
+            
+            st.divider()
+            
+            st.markdown("**Technology Stack:**")
+            tech_info = {
+                "PDF Processing": "LlamaIndex",
+                "Text Embedding": "HuggingFace Transformers",
+                "Vector Storage": "Qdrant (HNSW indexing)",
+                "Vector Search": "Cosine Similarity",
+                "LLM Provider": "Groq API",
+                "Backend": "FastAPI + Uvicorn",
+                "Frontend": "Streamlit",
+                "Event Scheduling": "Inngest",
+                "Chunking": "LlamaIndex SentenceSplitter"
+            }
+            
+            col1, col2 = st.columns(2)
+            
+            items = list(tech_info.items())
+            for i, (key, value) in enumerate(items):
+                if i % 2 == 0:
+                    with col1:
+                        st.caption(f"**{key}:** {value}")
+                else:
+                    with col2:
+                        st.caption(f"**{key}:** {value}")
