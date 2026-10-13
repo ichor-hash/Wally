@@ -8,3 +8,37 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+
+# Environment variables (NEVER commit)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database & Storage
+qdrant_storage/
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+temp/
+
+# Credentials
+credentials.json
+secrets.json
