@@ -2,7 +2,7 @@
 
 I built this because I got tired of paying OpenAI $50/month just to ask questions about my own documents. Turns out you don't need fancy proprietary APIs—just smart vector math and a free LLM.
 
-**Wally** is a production-ready RAG (Retrieval-Augmented Generation) system. Upload PDFs or text files. Ask questions. Get answers grounded in your documents. No hallucinations because everything comes from your data.
+**Wally** is a production-ready RAG (Retrieval-Augmented Generation) system. Upload PDFs or text files. Ask questions. Get answers grounded in your documents.
 
 ## What It Does
 
