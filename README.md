@@ -168,6 +168,8 @@ cd wally-frontend
 npm install
 npm run dev
 ```
+Day-to-day start/stop commands and troubleshooting: [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
 Open <http://localhost:3000>. API docs: <http://localhost:8001/docs>. Qdrant dashboard: <http://localhost:6333/dashboard>.
 
 ---
@@ -239,6 +241,7 @@ Wally-master/
 ├── demo/                Apple FY2025 10-K: Risk Factors and MD&A, ready to upload
 ├── docs/
 │   ├── DEMO_GUIDE.md          Ten-minute demo script, tested questions, evaluation, Q&A
+│   ├── RUNBOOK.md             Start, stop, troubleshoot and reset (Windows commands)
 │   └── TECHNICAL_OVERVIEW.md  Background essay on the original design
 └── wally-frontend/      Next.js app
     ├── app/             layout, global styles, page (state and data flow), fonts
