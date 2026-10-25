@@ -327,6 +327,7 @@ export default function Home() {
             <AskView
               exchanges={exchanges}
               documents={documents}
+              companyName={health && health.company_name !== "your company" ? health.company_name : undefined}
               input={input}
               onInput={setInput}
               onAsk={ask}

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.1.0 — Apple 10-K demo
+
+### Added
+- `COMPANY_PROFILE` setting: company background injected into the system prompt (not citable); the company name is shown on the Ask screen.
+- `demo/` with Risk Factors (Item 1A) and MD&A (Item 7) from Apple's FY2025 Form 10-K, extracted from SEC EDGAR.
+- `docs/DEMO_GUIDE.md` rewritten around the Apple scenario: setup checklist, live script with tested questions, a hand-checked evaluation (6 of 7 correct), root-cause analysis of the table failure with four fixes, prepared answers and a figures cheat sheet.
+
 ## v2.0.0 — Company knowledge assistant
 
 ### Added

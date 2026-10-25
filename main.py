@@ -39,6 +39,7 @@ RERANK_CANDIDATE_MULTIPLIER = 3  # retrieve top_k * N candidates before rerankin
 GAP_THRESHOLD = float(os.getenv("GAP_THRESHOLD", "0.25"))
 COMPANY_NAME = os.getenv("COMPANY_NAME", "your company")
 ASSISTANT_NAME = os.getenv("ASSISTANT_NAME", "Wally")
+COMPANY_PROFILE = os.getenv("COMPANY_PROFILE", "").strip()
 SUPPORTED_EXTENSIONS = [".pdf", ".txt", ".md"]
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
@@ -185,6 +186,10 @@ def build_messages(query: str, sources: List[Dict[str, Any]], history: List[Chat
         "or team might have it - never invent policies, numbers or names. "
         "Be concise and use short paragraphs or bullet lists where it helps readability."
     )
+    if COMPANY_PROFILE:
+        # Background only: lets the assistant interpret terms like "this fiscal year",
+        # but facts in answers must still come from the cited passages.
+        system += f"\n\nBackground on {COMPANY_NAME} (for interpreting questions, not a citable source): {COMPANY_PROFILE}"
     messages = [{"role": "system", "content": system}]
     # Keep a short window of prior turns so follow-up questions make sense
     for turn in history[-6:]:

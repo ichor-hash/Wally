@@ -10,6 +10,7 @@ import { PrimaryButton, TextButton } from "../ui";
 interface Props {
   exchanges: Exchange[];
   documents: DocumentInfo[];
+  companyName?: string;
   input: string;
   onInput: (v: string) => void;
   onAsk: (q: string) => void;
@@ -60,6 +61,7 @@ export function AskView({ scrollRef, ...p }: Props) {
         <div className="mx-auto w-full max-w-[720px] px-6 sm:px-10">
           {empty ? (
             <div className="flex min-h-[60vh] flex-col justify-center py-16">
+              {p.companyName && <p className="mb-5 text-[13px] text-faint">Knowledge assistant for {p.companyName}</p>}
               <h1 className="font-display text-[44px] font-medium leading-[1.05] tracking-[-0.03em] text-ink sm:text-[52px]">
                 Ask your documents.
               </h1>

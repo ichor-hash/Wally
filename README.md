@@ -34,6 +34,8 @@ Upload internal documents, ask questions in plain language, and get answers that
 | Documentation gaps go unnoticed | Weakly matched or down-voted questions are logged as **knowledge gaps** |
 | AI systems are a black box | **Latency per stage and real token usage** are shown for every answer |
 
+**Demo:** [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) runs Wally as Apple's internal assistant on its real FY2025 10-K, with tested questions, a hand-checked evaluation (6 of 7 correct) and the one systematic failure explained.
+
 ---
 
 ## Architecture
@@ -170,7 +172,8 @@ All settings are environment variables, read from `.env` (see `.env.example`).
 | Variable | Default | Purpose |
 |---|---|---|
 | `GROQ_API_KEY` | (required) | LLM access |
-| `COMPANY_NAME` | `your company` | Used in the assistant's system prompt |
+| `COMPANY_NAME` | `your company` | Who the assistant works for (system prompt and Ask screen) |
+| `COMPANY_PROFILE` | (empty) | Short company background added to the system prompt; not a citable source |
 | `ASSISTANT_NAME` | `Wally` | Assistant name in the system prompt |
 | `RATE_LIMIT` | `30` | Questions per minute per client |
 | `GAP_THRESHOLD` | `0.25` | Best-match similarity below this is logged as a knowledge gap |
@@ -226,8 +229,9 @@ Wally-master/
 ├── app.py               Legacy Streamlit UI (optional)
 ├── requirements.txt
 ├── .env.example
+├── demo/                Apple FY2025 10-K: Risk Factors and MD&A, ready to upload
 ├── docs/
-│   ├── DEMO_GUIDE.md          Walkthrough and talking points for presentations
+│   ├── DEMO_GUIDE.md          Ten-minute demo script, tested questions, evaluation, Q&A
 │   └── TECHNICAL_OVERVIEW.md  Background essay on the original design
 └── wally-frontend/      Next.js app
     ├── app/             layout, global styles, page (state and data flow), fonts
