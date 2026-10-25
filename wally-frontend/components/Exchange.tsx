@@ -24,7 +24,7 @@ export interface Exchange {
 
 const GROUNDING: Record<Confidence["level"], { label: string; dot: string; hint: string }> = {
   high: { label: "Well grounded", dot: "bg-ok", hint: "Strong match in your documents" },
-  medium: { label: "Partly grounded", dot: "bg-warn", hint: "Related passages found. Verify key details." },
+  medium: { label: "Partly grounded", dot: "bg-warn", hint: "Related chunks found. Verify key details." },
   low: { label: "Weakly grounded", dot: "bg-bad", hint: "Little supporting evidence. Logged as a knowledge gap." },
   none: { label: "No sources found", dot: "bg-bad", hint: "Nothing relevant found. Logged as a knowledge gap." },
 };
@@ -46,7 +46,7 @@ function StageLine({ ex }: { ex: Exchange }) {
     return <p className="text-[13.5px] text-warn">Waiting for quota. This question sends automatically when the limit resets.</p>;
   }
   const label =
-    ex.stage === "retrieving" ? (ex.reranked ? "Searching and reranking passages" : "Searching passages") : ex.stage === "retrieved" ? "Reading sources" : "Writing";
+    ex.stage === "retrieving" ? (ex.reranked ? "Searching and reranking chunks" : "Searching chunks") : ex.stage === "retrieved" ? "Reading sources" : "Writing";
   const t = ex.stageTimes;
   return (
     <div className="flex items-center gap-4 text-[13px] text-muted">
@@ -167,7 +167,7 @@ export function ExchangeView({ ex, onOpenSource, onFeedback, onRetry }: Props) {
                   ["First token", formatMs(m.ttft)],
                   ["Prompt tokens", m.prompt_tokens.toLocaleString()],
                   ["Completion tokens", m.completion_tokens.toLocaleString()],
-                  ["Passages scanned", String(m.candidates)],
+                  ["Chunks scanned", String(m.candidates)],
                 ] as const
               ).map(([k, v]) => (
                 <div key={k}>
@@ -193,7 +193,7 @@ export function ExchangeView({ ex, onOpenSource, onFeedback, onRetry }: Props) {
                     <button onClick={() => onOpenSource(s)} className="truncate font-medium text-ink underline-offset-4 hover:underline">
                       {s.source_file}
                     </button>
-                    <span className="text-faint">passage {s.chunk_index}</span>
+                    <span className="text-faint">chunk {s.chunk_index}</span>
                     <span className="tabular ml-auto text-faint">
                       {s.rerank_score != null && `relevance ${(s.rerank_score * 100).toFixed(0)}% · `}
                       match {(s.vector_score * 100).toFixed(0)}%

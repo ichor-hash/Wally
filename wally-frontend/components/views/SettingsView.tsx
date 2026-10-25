@@ -37,7 +37,7 @@ export function SettingsView({ settings, onChange, health, rerankerWarming }: Pr
         ["API", health.status === "healthy" ? "Healthy" : "Degraded"],
         ["Vector database", `Qdrant, ${health.database_status}`],
         ["Collection", health.collection],
-        ["Indexed", `${health.total_documents} ${health.total_documents === 1 ? "document" : "documents"}, ${health.total_chunks.toLocaleString()} passages`],
+        ["Indexed", `${health.total_documents} ${health.total_documents === 1 ? "document" : "documents"}, ${health.total_chunks.toLocaleString()} chunks`],
         ["Embedding model", `${health.embedding_model.split("/").pop()} (${health.dimension} dimensions)`],
         ["Language model", `${health.llm_model} via ${health.llm_provider}`],
         ["Reranker", `${rerankModel}, ${health.reranker_loaded ? "loaded" : "loads on first use"}`],
@@ -59,19 +59,19 @@ export function SettingsView({ settings, onChange, health, rerankerWarming }: Pr
             control={<Toggle label="Stream responses" checked={settings.streaming} onChange={(v) => onChange({ ...settings, streaming: v })} />}
           />
           <Row
-            title="Rerank passages"
+            title="Rerank chunks"
             description={
               <>
-                Fetch {settings.topK * 3} candidate passages, then re-score each one against the question with a cross-encoder ({rerankModel}). More precise,
+                Fetch {settings.topK * 3} candidate chunks, then re-score each one against the question with a cross-encoder ({rerankModel}). More precise,
                 slightly slower.
                 {rerankerWarming && <span className="text-ink"> Loading the model.</span>}
               </>
             }
-            control={<Toggle label="Rerank passages" checked={settings.rerank} onChange={(v) => onChange({ ...settings, rerank: v })} />}
+            control={<Toggle label="Rerank chunks" checked={settings.rerank} onChange={(v) => onChange({ ...settings, rerank: v })} />}
           />
           <Row
             title="Sources per answer"
-            description="How many passages the model reads. More context can help broad questions but costs tokens."
+            description="How many chunks the model reads. More context can help broad questions but costs tokens."
             control={
               <div className="flex w-40 items-center gap-4">
                 <input

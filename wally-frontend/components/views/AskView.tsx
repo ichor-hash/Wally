@@ -66,13 +66,13 @@ export function AskView({ scrollRef, ...p }: Props) {
                 Ask your documents.
               </h1>
               <p className="mt-5 max-w-md text-[16px] leading-relaxed text-muted">
-                Every answer is written from your own files and points to the exact passages it used.
+                Every answer is written from your own files and points to the exact chunks it used.
               </p>
 
               {p.documents.length > 0 ? (
                 <>
                   <p className="tabular mt-10 text-[13px] text-faint">
-                    {p.documents.length} {p.documents.length === 1 ? "document" : "documents"} · {totalChunks.toLocaleString()} passages indexed
+                    {p.documents.length} {p.documents.length === 1 ? "document" : "documents"} · {totalChunks.toLocaleString()} chunks indexed
                   </p>
                   <ul className="mt-4 border-t border-line-soft">
                     {suggestions.map((s) => (

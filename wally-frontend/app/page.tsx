@@ -295,7 +295,7 @@ export default function Home() {
     }
   };
 
-  // Passages cited by the last 10 answers, highlighted in document previews
+  // Chunks cited by the last 10 answers, highlighted in document previews
   const recentChunkUse = useMemo(() => {
     const map = new Map<string, number>();
     exchanges.slice(-10).forEach((e) => e.sources?.forEach((s) => map.set(s.id, (map.get(s.id) ?? 0) + 1)));

@@ -69,7 +69,7 @@ Your uploaded documents stay inside the `eager_leavitt` container and come back 
 
 1. Start all three services (above).
 2. Open <http://localhost:3000> in a maximised window.
-3. **Settings** → turn **Rerank passages** on (loads the model once).
+3. **Settings** → turn **Rerank chunks** on (loads the model once).
 4. Follow [DEMO_GUIDE.md](DEMO_GUIDE.md). The demo files are in the `demo` folder.
 
 ---

@@ -180,15 +180,15 @@ def build_messages(query: str, sources: List[Dict[str, Any]], history: List[Chat
     )
     system = (
         f"You are {ASSISTANT_NAME}, the internal knowledge assistant for {COMPANY_NAME}. "
-        "Answer employee questions using ONLY the numbered context passages provided. "
-        "Cite every factual claim with its passage number in square brackets, e.g. [1] or [2][3]. "
+        "Answer employee questions using ONLY the numbered context chunks provided. "
+        "Cite every factual claim with its chunk number in square brackets, e.g. [1] or [2][3]. "
         "If the context does not contain the answer, say so plainly and suggest what document "
         "or team might have it - never invent policies, numbers or names. "
         "Be concise and use short paragraphs or bullet lists where it helps readability."
     )
     if COMPANY_PROFILE:
         # Background only: lets the assistant interpret terms like "this fiscal year",
-        # but facts in answers must still come from the cited passages.
+        # but facts in answers must still come from the cited chunks.
         system += f"\n\nBackground on {COMPANY_NAME} (for interpreting questions, not a citable source): {COMPANY_PROFILE}"
     messages = [{"role": "system", "content": system}]
     # Keep a short window of prior turns so follow-up questions make sense

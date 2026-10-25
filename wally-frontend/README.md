@@ -19,7 +19,7 @@ The backend URL defaults to `http://localhost:8001`; override it with `NEXT_PUBL
 | `components/Sidebar.tsx` | Navigation, quota and connection status |
 | `components/Exchange.tsx` | One question and answer: progress, citations, sources, timing, feedback |
 | `components/Markdown.tsx` | Answer renderer with clickable citations |
-| `components/DocumentDrawer.tsx` | Passage preview, statistics, citation map |
+| `components/DocumentDrawer.tsx` | Chunk preview, statistics, citation map |
 | `components/views/*` | Ask, Library, Performance, Knowledge gaps, Settings |
 | `lib/api.ts` | Typed API client, SSE parser, upload with progress |
 

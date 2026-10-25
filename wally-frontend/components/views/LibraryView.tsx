@@ -56,7 +56,7 @@ export function LibraryView({ documents, recentlyCited, onChanged, onOpenDocumen
         toast(
           "success",
           `${file.name} indexed`,
-          `${result.chunks} passages${result.replaced_chunks ? `, replacing ${result.replaced_chunks} from the previous version` : ""}`,
+          `${result.chunks} chunks${result.replaced_chunks ? `, replacing ${result.replaced_chunks} from the previous version` : ""}`,
         );
         onChanged();
         setTimeout(() => setJobs((prev) => prev.filter((j) => j.id !== id)), 2500);
@@ -122,7 +122,7 @@ export function LibraryView({ documents, recentlyCited, onChanged, onOpenDocumen
         description="The documents Wally answers from. Uploading a file with an existing name replaces the old version."
         aside={
           <p className="tabular text-[13px] text-faint">
-            {documents.length} {documents.length === 1 ? "document" : "documents"} · {totalChunks.toLocaleString()} passages · {formatBytes(totalSize)} of text
+            {documents.length} {documents.length === 1 ? "document" : "documents"} · {totalChunks.toLocaleString()} chunks · {formatBytes(totalSize)} of text
           </p>
         }
       />
@@ -202,7 +202,7 @@ export function LibraryView({ documents, recentlyCited, onChanged, onOpenDocumen
               <thead>
                 <tr className="text-left text-[12.5px] text-faint">
                   <th className="py-3 pr-4 font-normal">Name</th>
-                  <th className="py-3 pr-4 text-right font-normal">Passages</th>
+                  <th className="py-3 pr-4 text-right font-normal">Chunks</th>
                   <th className="py-3 pr-4 text-right font-normal">Text</th>
                   <th className="py-3 pr-4 text-right font-normal">Citations</th>
                   <th className="py-3 pr-4 text-right font-normal">Added</th>

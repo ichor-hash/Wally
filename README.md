@@ -1,7 +1,7 @@
 # Wally
 
 **A company knowledge assistant built on retrieval-augmented generation (RAG).**
-Upload internal documents, ask questions in plain language, and get answers that cite the exact passages they came from, with every step of the pipeline measured live.
+Upload internal documents, ask questions in plain language, and get answers that cite the exact chunks they came from, with every step of the pipeline measured live.
 
 ![version](https://img.shields.io/badge/version-2.0.0-1a1a1a) ![python](https://img.shields.io/badge/python-3.11%2B-333333) ![next.js](https://img.shields.io/badge/next.js-16-666666)
 
@@ -29,7 +29,7 @@ Upload internal documents, ask questions in plain language, and get answers that
 | Problem in a company | How Wally addresses it |
 |---|---|
 | Knowledge is scattered across PDFs, policies and wikis | One searchable library of PDF, TXT and Markdown files |
-| Chatbots invent answers | Answers are generated **only** from retrieved passages and cite them as `[1]`, `[2]` |
+| Chatbots invent answers | Answers are generated **only** from retrieved chunks and cite them as `[1]`, `[2]` |
 | Nobody knows if an answer can be trusted | Each answer carries a **grounding label** derived from retrieval scores |
 | Documentation gaps go unnoticed | Weakly matched or down-voted questions are logged as **knowledge gaps** |
 | AI systems are a black box | **Latency per stage and real token usage** are shown for every answer |
@@ -70,7 +70,7 @@ sequenceDiagram
         API->>API: cross-encoder re-scores candidates, keeps top_k
     end
     API-->>UI: event: sources (+ grounding label)
-    API->>LLM: numbered passages + question + recent turns
+    API->>LLM: numbered chunks + question + recent turns
     loop streaming
         LLM-->>API: token
         API-->>UI: event: token
@@ -86,7 +86,7 @@ sequenceDiagram
 
 ### Answering
 - **Token streaming** over Server-Sent Events, with live stage progress and a Stop button.
-- **Inline citations.** Clicking a number opens the source passage; the file name opens the full document preview.
+- **Inline citations.** Clicking a number opens the source chunk; the file name opens the full document preview.
 - **Grounding label** per answer: well, partly or weakly grounded, or no sources found.
 - **Follow-up questions** use the last three exchanges as conversation context.
 - **Optional reranking** with a cross-encoder that re-scores three times as many candidates and keeps the best.
@@ -97,7 +97,7 @@ sequenceDiagram
 
 ### Library
 - Drag-and-drop upload of several files at once, with **automatic retries** (exponential back-off: 1 s, 2 s, 4 s) for network errors, 5xx and 429 responses.
-- **Document preview:** every passage, length statistics, a length histogram, and a citation map showing which parts of a document actually get used. Passages cited in recent answers are highlighted.
+- **Document preview:** every chunk, length statistics, a length histogram, and a citation map showing which parts of a document actually get used. Chunks cited in recent answers are highlighted.
 
 ### Reliability
 - **Per-client rate limiting** (sliding 60-second window) with `X-RateLimit-*` and `Retry-After` headers.
@@ -127,7 +127,7 @@ sequenceDiagram
 | Backend | FastAPI + Uvicorn | Async, typed request models, native streaming responses |
 | Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384-d) | Free, local, ~50 ms per query on CPU |
 | Vector DB | Qdrant (HNSW, cosine) | Fast approximate search, payload filters, runs in Docker |
-| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reads query and passage together, so it is more precise than vector similarity |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reads query and chunk together, so it is more precise than vector similarity |
 | LLM | `openai/gpt-oss-20b` via Groq | Free tier, very high tokens per second |
 | PDF parsing | pypdf | Lightweight, no native dependencies |
 | Events (optional) | Inngest | Background ingestion and search functions |
@@ -204,9 +204,9 @@ In-app settings (stored in the browser): streaming on/off, reranking on/off, sou
 | `POST` | `/ingest/pdf` | Upload a PDF, TXT or MD file (multipart `file`) |
 | `POST` | `/ingest/texts` | Ingest raw strings |
 | `POST` | `/ingest/directory` | Ingest every supported file in a server-side folder |
-| `GET` | `/documents` | Documents with passage counts, size and citation totals |
-| `GET` | `/documents/{name}/chunks` | Passages, length statistics, histogram and usage counts |
-| `DELETE` | `/documents/{name}` | Remove a document and all of its passages |
+| `GET` | `/documents` | Documents with chunk counts, size and citation totals |
+| `GET` | `/documents/{name}/chunks` | Chunks, length statistics, histogram and usage counts |
+| `DELETE` | `/documents/{name}` | Remove a document and all of its chunks |
 | `GET` | `/health` | Service, database and model status |
 | `GET` | `/metrics` | Latency percentiles, averages and the last 30 queries |
 | `GET` | `/rate-limit` | Caller's quota and the provider's latest quota headers |
@@ -260,12 +260,12 @@ Wally-master/
 |---|---|---|
 | Embed | Turning the question into a 384-d vector | ~50 ms |
 | Search | Qdrant nearest-neighbour lookup | ~20–40 ms |
-| Rerank | Cross-encoder scoring of 3×top_k passages | ~0.15 s warm |
+| Rerank | Cross-encoder scoring of 3×top_k chunks | ~0.15 s warm |
 | Generate | LLM round trip, first byte to last token | ~1 s |
 | First token | Time from request until the first answer token appears | ~1.1 s |
 | Prompt / completion tokens | Exact counts reported by Groq | ~900 / ~450 |
-| Match | Cosine similarity between question and passage (0–100%) | 25–75% for relevant text |
-| Relevance | Cross-encoder probability that the passage answers the question | close to 0% or 100% |
+| Match | Cosine similarity between question and chunk (0–100%) | 25–75% for relevant text |
+| Relevance | Cross-encoder probability that the chunk answers the question | close to 0% or 100% |
 
 **Grounding label.** Without reranking, the top match decides: 50% or above is *well grounded*, 25% or above is *partly grounded*, anything lower is *weakly grounded*. With reranking, the thresholds are 70% and 30% on the relevance score.
 
@@ -273,10 +273,10 @@ Wally-master/
 
 ## Design decisions
 
-- **Citations over trust.** The prompt numbers each passage and requires `[n]` citations, so every claim can be checked in one click.
+- **Citations over trust.** The prompt numbers each chunk and requires `[n]` citations, so every claim can be checked in one click.
 - **Measure, don't estimate.** Token counts come from the provider's usage field rather than a characters ÷ 4 estimate, and each pipeline stage is timed separately.
 - **Retrieve wide, then rerank narrow.** Vector search is fast but approximate; the cross-encoder is precise but slow. Fetching 3×top_k candidates and reranking them gets the benefits of both.
-- **Re-upload replaces.** Documents are keyed by file name, so updating a policy never leaves stale passages behind.
+- **Re-upload replaces.** Documents are keyed by file name, so updating a policy never leaves stale chunks behind.
 - **Degrade gracefully.** Rate-limited questions queue instead of failing; uploads retry; the UI keeps working, and says so, when the API is down.
 - **Quiet interface.** A neutral palette and typographic hierarchy keep attention on the answers and their sources.
 

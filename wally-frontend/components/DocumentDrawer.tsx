@@ -67,7 +67,7 @@ export function DocumentDrawer({ docName, recentChunkUse, focusChunkId, onClose 
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={`Passages in ${docName}`}
+        aria-label={`Chunks in ${docName}`}
       >
         <div className="flex items-start justify-between gap-6 px-8 pt-10 pb-8 sm:px-12">
           <div className="min-w-0">
@@ -79,15 +79,15 @@ export function DocumentDrawer({ docName, recentChunkUse, focusChunkId, onClose 
           </button>
         </div>
 
-        {error && <p className="px-8 text-[14px] text-bad sm:px-12">Could not load passages: {error}</p>}
-        {!data && !error && <p className="px-8 text-[14px] text-muted sm:px-12">Loading passages</p>}
+        {error && <p className="px-8 text-[14px] text-bad sm:px-12">Could not load chunks: {error}</p>}
+        {!data && !error && <p className="px-8 text-[14px] text-muted sm:px-12">Loading chunks</p>}
 
         {data && (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <dl className="tabular mx-8 grid grid-cols-2 gap-x-8 gap-y-6 border-y border-line-soft py-7 sm:mx-12 sm:grid-cols-4">
               {(
                 [
-                  ["Passages", data.total_chunks.toLocaleString()],
+                  ["Chunks", data.total_chunks.toLocaleString()],
                   ["Average length", `${data.average_chunk_size}`],
                   ["Shortest / longest", `${data.min_chunk_size} / ${data.max_chunk_size}`],
                   ["Ever cited", `${data.chunks_used} of ${data.total_chunks}`],
@@ -103,7 +103,7 @@ export function DocumentDrawer({ docName, recentChunkUse, focusChunkId, onClose 
             <div className="grid gap-10 px-8 pt-8 sm:grid-cols-2 sm:px-12">
               <section>
                 <p className="text-[13px] font-medium text-ink">Citation map</p>
-                <p className="mt-1 text-[12.5px] text-faint">Each mark is a passage in reading order. Darker means cited more.</p>
+                <p className="mt-1 text-[12.5px] text-faint">Each mark is a chunk in reading order. Darker means cited more.</p>
                 <div className="mt-4 flex flex-wrap gap-[3px]">
                   {data.chunks.map((c) => {
                     const recent = recentChunkUse.get(c.id) ?? 0;
@@ -112,7 +112,7 @@ export function DocumentDrawer({ docName, recentChunkUse, focusChunkId, onClose 
                       <button
                         key={c.id}
                         onClick={() => jumpTo(c.id)}
-                        title={`Passage ${c.chunk_index}, cited ${c.used_count}×${recent ? `, ${recent} in this session` : ""}`}
+                        title={`Chunk ${c.chunk_index}, cited ${c.used_count}×${recent ? `, ${recent} in this session` : ""}`}
                         className={`h-[18px] w-[10px] rounded-[2px] transition-transform hover:scale-y-110 ${recent ? "ring-1 ring-ink ring-offset-1" : ""}`}
                         style={{ background: c.used_count ? `color-mix(in srgb, #1a1a1a ${shade}%, #ececec)` : "#ececec" }}
                       />
@@ -123,7 +123,7 @@ export function DocumentDrawer({ docName, recentChunkUse, focusChunkId, onClose 
 
               <section>
                 <div className="flex items-baseline justify-between gap-4">
-                  <p className="text-[13px] font-medium text-ink">Passage length</p>
+                  <p className="text-[13px] font-medium text-ink">Chunk length</p>
                   <p className="tabular text-[12.5px] text-faint">{hb ? `${hb.bucket_start}–${hb.bucket_end} chars: ${hb.count}` : "characters"}</p>
                 </div>
                 <div className="mt-4 flex h-16 items-end gap-[2px]" onMouseLeave={() => setHoverBucket(null)}>
@@ -158,7 +158,7 @@ export function DocumentDrawer({ docName, recentChunkUse, focusChunkId, onClose 
             </div>
 
             <ol className="px-8 pb-16 sm:px-12">
-              {visible.length === 0 && <li className="py-10 text-[14px] text-muted">No passages match.</li>}
+              {visible.length === 0 && <li className="py-10 text-[14px] text-muted">No chunks match.</li>}
               {visible.map((c) => {
                 const recent = recentChunkUse.get(c.id) ?? 0;
                 return (

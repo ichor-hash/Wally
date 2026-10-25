@@ -51,7 +51,7 @@ export const CLICK_LINES = [
   "Professional cloud. Amateur comedian.",
   "Careful, I'm 90% lightning.",
   "Boop received. Boop returned.",
-  "I've read every passage in here. Ask me something.",
+  "I've read every chunk in here. Ask me something.",
 ];
 
 export const FAINT_LINES = ["Too... many... clicks.", "Okay, okay. I'm down.", "Tell my embeddings I loved them."];

@@ -4,7 +4,7 @@ import { Insights, KnowledgeGap, timeAgo } from "@/lib/api";
 import { Figure, TextButton, ViewHeader } from "../ui";
 
 const REASON: Record<KnowledgeGap["reason"], string> = {
-  no_results: "No passages found",
+  no_results: "No chunks found",
   low_relevance: "Weak match",
   negative_feedback: "Marked not helpful",
 };
