@@ -133,8 +133,11 @@ sequenceDiagram
 - Docker Desktop
 - A free Groq API key from <https://console.groq.com>
 
-### 1. Vector database
+### 1. Clone and start the vector database
 ```bash
+git clone https://github.com/ichor-hash/Wally.git
+cd Wally
+
 docker run -d --name wally-qdrant -p 6333:6333 -p 6334:6334 \
   -v wally_qdrant:/qdrant/storage qdrant/qdrant
 ```
