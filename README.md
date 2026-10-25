@@ -109,6 +109,13 @@ sequenceDiagram
 - Questions whose best match is below a similarity threshold, and answers marked *Not helpful*, are stored in `wally_data/insights.json`.
 - The gaps view lists them by frequency so the team knows which document to write next.
 
+### Wally, the mascot
+- A pixel-art storm-cloud (Stormhead sprites) peeks from the bottom-right corner, or sideways from the right edge on phones.
+- **Click** him for a random reaction and a typed pixel speech bubble; click four times quickly and he faints and respawns.
+- On every **page change** he makes a cameo with a page-specific line, then sprints or beams back to his corner.
+- Now and then (or with **Shift + W**) he goes on a **rampage**, charging across the screen firing lightning at "hallucinations".
+- Sprites are stepped with GPU transforms from a single 38 KB atlas. He respects reduced-motion settings and never interrupts typing.
+
 ---
 
 ## Tech stack
@@ -116,7 +123,7 @@ sequenceDiagram
 | Layer | Choice | Why |
 |---|---|---|
 | Frontend | Next.js 16, React 19, Tailwind CSS 4 | Streaming UI, component model, fast iteration |
-| Typography | Satoshi (display), Figtree (text) | Distinct headings, highly readable body text |
+| Typography | Satoshi (display), Figtree (text), Pixelify Sans (mascot) | Distinct headings, readable body text, pixel speech bubbles |
 | Backend | FastAPI + Uvicorn | Async, typed request models, native streaming responses |
 | Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384-d) | Free, local, ~50 ms per query on CPU |
 | Vector DB | Qdrant (HNSW, cosine) | Fast approximate search, payload filters, runs in Docker |
@@ -236,7 +243,9 @@ Wally-master/
 └── wally-frontend/      Next.js app
     ├── app/             layout, global styles, page (state and data flow), fonts
     ├── components/      Sidebar, Exchange (Q&A), Markdown, DocumentDrawer, Toaster, ui
+    │   ├── mascot/      Wally sprite engine and his lines
     │   └── views/       Ask, Library, Performance, Knowledge gaps, Settings
+    ├── public/wally/    Mascot sprite atlas
     └── lib/api.ts       Typed API client, SSE parser, upload with progress
 ```
 

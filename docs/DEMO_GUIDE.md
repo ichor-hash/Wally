@@ -131,6 +131,7 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 1. **Performance** tab: "Median response about 1.1 s. Embedding and search take milliseconds; almost all the time is the language model."
 2. Sidebar foot: "Rate limiting per user, plus Groq's own token quota, live. Over the limit, questions queue instead of failing."
 3. **Settings**: "Reranking, streaming and source count are all switchable."
+4. **Wally**: click the mascot in the corner, then press **Shift + W**. "And this is Wally. He hunts hallucinations." He charges across the screen firing lightning. End on a smile.
 
 **Closing line:**
 > Wally answers from the documents, proves every claim, measures itself, admits what it doesn't know, and I can show you exactly where it still fails and how I'd fix it.

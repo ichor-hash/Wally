@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.0 — Wally the mascot
+
+### Added
+- Pixel-art mascot built from the Stormhead sprite sheets (idle, run, attack, damaged, death), merged into one atlas and stepped with CSS transforms.
+- Peeks from the screen corner; click reactions with typed pixel speech bubbles; a four-click faint and respawn.
+- Page-change cameos with page-specific lines, followed by a sprint or a lightning beam back to the corner.
+- Random rampages across the screen firing lightning, plus a **Shift + W** shortcut.
+- Respects `prefers-reduced-motion`; never triggers while the user is typing.
+
 ## v2.1.0 — Apple 10-K demo
 
 ### Added
