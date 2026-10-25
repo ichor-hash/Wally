@@ -1,18 +1,19 @@
 [project]
-name = "production-ready-rag"
-version = "0.1.0"
-description = "Add your description here"
+name = "wally"
+version = "2.0.0"
+description = "Company knowledge assistant: retrieval-augmented answers with citations, streaming, reranking and live metrics"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.143.0",
-    "groq>=0.4.0",
-    "inngest>=0.5.19",
-    "llama-index-core>=0.14.25",
-    "llama-index-readers-file>=0.7.0",
+    "fastapi>=0.162.0",
+    "uvicorn[standard]>=0.54.0",
+    "pydantic>=2.14.1",
     "python-dotenv>=1.2.4",
-    "qdrant-client>=1.19.1",
-    "sentence-transformers>=6.1.0",
-    "streamlit>=1.65.0",
-    "uvicorn>=0.54.0",
+    "qdrant-client>=1.20.0",
+    "sentence-transformers>=6.2.0",
+    "groq>=1.7.0",
+    "pypdf>=6.21.2",
+    "inngest>=0.5.19",
+    "requests>=2.34.2",
+    "streamlit>=1.66.1",
 ]

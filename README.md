@@ -1,241 +1,277 @@
-# Wally: RAG That Actually Works
+# Wally
 
-I built this because I got tired of paying OpenAI $50/month just to ask questions about my own documents. Turns out you don't need fancy proprietary APIs—just smart vector math and a free LLM.
+**A company knowledge assistant built on retrieval-augmented generation (RAG).**
+Upload internal documents, ask questions in plain language, and get answers that cite the exact passages they came from, with every step of the pipeline measured live.
 
-**Wally** is a production-ready RAG (Retrieval-Augmented Generation) system. Upload PDFs or text files. Ask questions. Get answers grounded in your documents.
-
-## What It Does
-
-1. **Ingest:** PDFs, TXT, Markdown → Chunked into bite-sized pieces
-2. **Embed:** Each chunk becomes a 384-dimensional vector (local, free, fast)
-3. **Search:** Your question finds the most similar chunks using cosine similarity
-4. **Answer:** LLM synthesizes those chunks into a human-readable answer
-
-It's basically semantic search + text generation. Simple, but it works.
-
-## Quick Start
-
-### Requirements
-- Python 3.11+
-- Docker Desktop (for Qdrant vector database)
-- ~2GB free disk space
-
-**Why Docker Desktop?**  
-Qdrant (the vector database) runs as a containerized service. Docker Desktop manages this container, ensuring consistent performance across machines. It's like a lightweight VM for databases. On Windows/Mac, Docker Desktop is the easiest way to run Qdrant without manual setup.
-
-### Installation
-
-```bash
-# Clone the repo
-git clone https://github.com/yourusername/Wally.git
-cd Wally
-
-# Create virtual env
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Get a free Groq API key
-# Sign up at https://console.groq.com
-# Create .env file with your key:
-echo "GROQ_API_KEY=your_key_here" > .env
-```
-
-### Start the System
-
-**1. Start Docker Desktop** (if not already running)  
-Open Docker Desktop application.
-
-**2. Start Qdrant** (new terminal)
-```bash
-docker run -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
-```
-
-**3. Start FastAPI backend** (new terminal)
-```bash
-python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
-```
-
-**4. Start Streamlit frontend** (new terminal)
-```bash
-streamlit run app.py
-```
-
-Open `http://localhost:8501` in your browser.
-
-## How It Works
-
-### 1. Upload Documents
-- Supports: PDF, TXT, Markdown
-- Auto-chunks text into 512-character pieces
-- Embeds everything locally (no cloud storage)
-
-### 2. Ask Questions
-- Type natural language questions
-- System finds top 5 similar chunks
-- LLM synthesizes answer from those chunks
-- Shows relevance scores + source text
-
-### 3. Storage Management
-- See all uploaded documents
-- Delete documents (removes all chunks)
-- Real-time storage stats
-
-## Architecture
-
-```
-Your Documents
-    ↓
-PDF Parser (LlamaIndex)
-    ↓
-Text Chunks (512 chars, 50 char overlap)
-    ↓
-Embeddings (HuggingFace Transformers)
-    ↓
-Vector Database (Qdrant)
-    ↓
-Vector Search (HNSW indexing)
-    ↓
-LLM (Groq)
-    ↓
-Your Answer
-```
-
-**Why These Tools?**
-- **Qdrant:** HNSW indexing = fast semantic search
-- **HuggingFace:** Free embeddings, runs locally, 384 dimensions
-- **Groq:** Free tier LLM with 1000 tokens/sec throughput
-- **Streamlit:** UI in pure Python, no JavaScript hell
-- **FastAPI:** REST API with auto-docs
-
-## System Limits
-
-Know what you're getting into:
-
-| Metric | Limit | Notes |
-|--------|-------|-------|
-| **Max Chunks** | 10M | Per Qdrant collection |
-| **Max File Size** | 50MB | Single upload |
-| **Max Query Length** | 2000 chars | Prevent abuse |
-| **Search Latency** | 5-500ms | Depends on dataset size |
-| **LLM Latency** | 500-2000ms | Groq response time |
-| **Hallucination Rate** | 5-40% | Lower = more sources visible |
-| **Concurrent Users (free)** | ~50 | Before rate limiting |
-| **Storage Efficiency** | ~1.5KB/chunk | At 384 dimensions |
-
-## Key Features
-
-✅ **Local Embeddings** - No external API calls for embedding, run offline  
-✅ **Fast Search** - HNSW indexing, sub-100ms queries  
-✅ **Free** - Groq free tier, no OpenAI bills  
-✅ **Document Management** - Upload, delete, view storage  
-✅ **Relevance Scoring** - See why chunks were selected  
-✅ **Error Handling** - Comprehensive try-catch, user-friendly errors  
-✅ **Async Operations** - FastAPI async/await for concurrency  
-✅ **Beautiful UI** - Warm linen aesthetic, Figtree typography  
-
-## Customization
-
-### Change Chunk Size
-```python
-# In main.py, ingest endpoints:
-loader = DocumentLoader(chunk_size=1024, chunk_overlap=100)
-```
-
-### Use Different Embeddings
-```python
-# In app.py or main.py:
-from embeddings import get_embedding_provider
-
-embedder = get_embedding_provider("groq")  # Cloud-based, 1024 dims
-# or
-embedder = get_embedding_provider("openrouter")  # OpenRouter API
-```
-
-### Use Different LLM
-```python
-# In main.py:
-llm = get_llm_provider("openrouter", model="meta-llama/llama-3.1-70b")
-```
-
-## Troubleshooting
-
-**Q: "Cannot connect to API"**  
-A: Make sure FastAPI is running on port 8001: `python -m uvicorn main:app --port 8001`
-
-**Q: Qdrant connection refused**  
-A: Start Docker: `docker run -p 6333:6333 qdrant/qdrant:latest`
-
-**Q: Groq API key error**  
-A: Check `.env` file has `GROQ_API_KEY=` (not empty), no extra spaces
-
-**Q: Takes too long to search**  
-A: Might have too many chunks. Try fewer results or delete old documents.
-
-**Q: Gets hallucinations**  
-A: Ask more specific questions. Try increasing top_k to see more context.
-
-**Q: File upload fails**  
-A: Check file size < 50MB and format is PDF/TXT/MD
-
-## Performance Tips
-
-1. **Keep chunks small** (256-512 chars) - Better relevance
-2. **Use high similarity threshold** - Filter out weak matches
-3. **Limit top_k to 5** - Faster, better focused answers
-4. **Delete old documents** - Cleaner search results
-5. **Ask specific questions** - "What is X?" beats "Tell me about everything"
-
-## What's Free
-
-- **Embeddings:** HuggingFace models (free, runs local)
-- **Vector DB:** Qdrant self-hosted (free)
-- **LLM:** Groq free tier (250K tokens/min, ~50 users concurrent)
-- **Deployment:** Run anywhere (laptop, server, cloud)
-
-## What Costs Money (Optional)
-
-- **Paid LLMs:** OpenAI, Anthropic (higher quality, rate limits)
-- **Cloud Hosting:** AWS, GCP, Vercel (if you scale)
-- **Better Embeddings:** OpenAI embeddings (higher quality)
-
-## Production Considerations
-
-**Before you ship this to real users:**
-
-1. Add authentication (protect your data)
-2. Add rate limiting (prevent abuse)
-3. Add logging (debug issues)
-4. Add backup (don't lose vector DB)
-5. Add monitoring (track performance)
-6. Test with real documents (edge cases exist)
-7. Have a fallback (what if LLM is down?)
-
-## Technical Deep Dive
-
-See `TECHNICAL_OVERVIEW.md` for:
-- How cosine similarity works (math + intuition)
-- HNSW indexing algorithm
-- Chunking strategy
-- Embedding dimensions explained
-- System limits & scaling
-
-## Contributing
-
-Found a bug? Have ideas? Open an issue or PR.
-
-## License
-
-MIT - Do what you want with it.
-
-## Who Built This
-
-Me, after one too many API bills and a weekend of frustration. If this saves you money or headache, you're welcome.
+![version](https://img.shields.io/badge/version-2.0.0-1a1a1a) ![python](https://img.shields.io/badge/python-3.11%2B-333333) ![next.js](https://img.shields.io/badge/next.js-16-666666)
 
 ---
 
-**Status:** Production-ready for small to medium datasets (< 100K chunks)  
-**Last Updated:** October 2026  
-**Next Steps:** Add reranking, hybrid search, caching, webhooks
+## Contents
+
+1. [What it does](#what-it-does)
+2. [Architecture](#architecture)
+3. [How a question is answered](#how-a-question-is-answered)
+4. [Features](#features)
+5. [Tech stack](#tech-stack)
+6. [Getting started](#getting-started)
+7. [Configuration](#configuration)
+8. [API reference](#api-reference)
+9. [Project structure](#project-structure)
+10. [Metrics explained](#metrics-explained)
+11. [Design decisions](#design-decisions)
+12. [Limitations and future work](#limitations-and-future-work)
+
+---
+
+## What it does
+
+| Problem in a company | How Wally addresses it |
+|---|---|
+| Knowledge is scattered across PDFs, policies and wikis | One searchable library of PDF, TXT and Markdown files |
+| Chatbots invent answers | Answers are generated **only** from retrieved passages and cite them as `[1]`, `[2]` |
+| Nobody knows if an answer can be trusted | Each answer carries a **grounding label** derived from retrieval scores |
+| Documentation gaps go unnoticed | Weakly matched or down-voted questions are logged as **knowledge gaps** |
+| AI systems are a black box | **Latency per stage and real token usage** are shown for every answer |
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Browser<br/>Next.js 16] -- REST + SSE --> A[FastAPI]
+    A --> E[Embedder<br/>all-MiniLM-L6-v2<br/>local CPU]
+    A --> Q[(Qdrant<br/>vector DB<br/>HNSW, cosine)]
+    A --> R[Reranker<br/>ms-marco cross-encoder<br/>local CPU, optional]
+    A --> L[LLM<br/>gpt-oss-20b<br/>via Groq]
+    A --> T[Telemetry<br/>metrics, gaps,<br/>rate limits]
+```
+
+Three processes run locally: **Qdrant** (Docker, port 6333), the **FastAPI** backend (port 8001) and the **Next.js** frontend (port 3000). Embedding and reranking run on the local CPU; only answer generation calls an external API.
+
+---
+
+## How a question is answered
+
+```mermaid
+sequenceDiagram
+    participant UI as Frontend
+    participant API as FastAPI
+    participant DB as Qdrant
+    participant LLM as Groq LLM
+    UI->>API: POST /search/stream {query, top_k, rerank, history}
+    API->>API: rate-limit check (per client)
+    API->>API: embed query (384-d vector)
+    API->>DB: nearest neighbours (top_k, or 3×top_k if reranking)
+    opt rerank enabled
+        API->>API: cross-encoder re-scores candidates, keeps top_k
+    end
+    API-->>UI: event: sources (+ grounding label)
+    API->>LLM: numbered passages + question + recent turns
+    loop streaming
+        LLM-->>API: token
+        API-->>UI: event: token
+    end
+    API-->>UI: event: complete (timings, token usage, quota)
+```
+
+**Ingestion** works the other way round: a file is parsed (pypdf for PDF), split into ~512-character chunks with a 50-character overlap at sentence boundaries, embedded, and stored in Qdrant with its file name, chunk index and upload time. Uploading a file with an existing name replaces its old chunks.
+
+---
+
+## Features
+
+### Answering
+- **Token streaming** over Server-Sent Events, with live stage progress and a Stop button.
+- **Inline citations.** Clicking a number opens the source passage; the file name opens the full document preview.
+- **Grounding label** per answer: well, partly or weakly grounded, or no sources found.
+- **Follow-up questions** use the last three exchanges as conversation context.
+- **Optional reranking** with a cross-encoder that re-scores three times as many candidates and keeps the best.
+
+### Observability
+- **Per answer:** total time, time to first token, prompt and completion tokens (reported by the provider), and an embed / search / rerank / generate breakdown.
+- **Performance view:** median and 95th-percentile latency, average tokens, and a stacked chart of recent questions, with a table alternative.
+
+### Library
+- Drag-and-drop upload of several files at once, with **automatic retries** (exponential back-off: 1 s, 2 s, 4 s) for network errors, 5xx and 429 responses.
+- **Document preview:** every passage, length statistics, a length histogram, and a citation map showing which parts of a document actually get used. Passages cited in recent answers are highlighted.
+
+### Reliability
+- **Per-client rate limiting** (sliding 60-second window) with `X-RateLimit-*` and `Retry-After` headers.
+- The sidebar shows **remaining queries** and the **model provider's own token quota**; questions over the limit are **queued** and sent automatically when the window resets.
+- **Connection indicator**: health check every 10 s (every 3 s while offline), with notifications when the API or database goes down or recovers.
+- **Toast notifications** for uploads, deletions, feedback and errors.
+
+### Knowledge gaps
+- Questions whose best match is below a similarity threshold, and answers marked *Not helpful*, are stored in `wally_data/insights.json`.
+- The gaps view lists them by frequency so the team knows which document to write next.
+
+---
+
+## Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Frontend | Next.js 16, React 19, Tailwind CSS 4 | Streaming UI, component model, fast iteration |
+| Typography | Satoshi (display), Figtree (text) | Distinct headings, highly readable body text |
+| Backend | FastAPI + Uvicorn | Async, typed request models, native streaming responses |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` (384-d) | Free, local, ~50 ms per query on CPU |
+| Vector DB | Qdrant (HNSW, cosine) | Fast approximate search, payload filters, runs in Docker |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reads query and passage together, so it is more precise than vector similarity |
+| LLM | `openai/gpt-oss-20b` via Groq | Free tier, very high tokens per second |
+| PDF parsing | pypdf | Lightweight, no native dependencies |
+| Events (optional) | Inngest | Background ingestion and search functions |
+
+---
+
+## Getting started
+
+### Prerequisites
+- Python 3.11 or 3.12
+- Node.js 20+
+- Docker Desktop
+- A free Groq API key from <https://console.groq.com>
+
+### 1. Vector database
+```bash
+docker run -d --name wally-qdrant -p 6333:6333 -p 6334:6334 \
+  -v wally_qdrant:/qdrant/storage qdrant/qdrant
+```
+The named volume keeps the index across container restarts.
+
+### 2. Backend
+```bash
+python -m venv venv
+venv\Scripts\activate            # macOS/Linux: source venv/bin/activate
+pip install -r requirements.txt
+copy .env.example .env           # macOS/Linux: cp .env.example .env, then add GROQ_API_KEY
+python -m uvicorn main:app --port 8001 --reload
+```
+The embedding model downloads on first start (~90 MB). The reranker downloads the first time it is switched on.
+
+### 3. Frontend
+```bash
+cd wally-frontend
+npm install
+npm run dev
+```
+Open <http://localhost:3000>. API docs: <http://localhost:8001/docs>. Qdrant dashboard: <http://localhost:6333/dashboard>.
+
+---
+
+## Configuration
+
+All settings are environment variables, read from `.env` (see `.env.example`).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GROQ_API_KEY` | (required) | LLM access |
+| `COMPANY_NAME` | `your company` | Used in the assistant's system prompt |
+| `ASSISTANT_NAME` | `Wally` | Assistant name in the system prompt |
+| `RATE_LIMIT` | `30` | Questions per minute per client |
+| `GAP_THRESHOLD` | `0.25` | Best-match similarity below this is logged as a knowledge gap |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `512` / `50` | Chunking, in characters |
+| `RERANK_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder used for reranking |
+| `QDRANT_URL` / `QDRANT_COLLECTION` | `http://localhost:6333` / `docs` | Vector store |
+| `NEXT_PUBLIC_API_BASE` (frontend) | `http://localhost:8001` | Backend URL |
+
+In-app settings (stored in the browser): streaming on/off, reranking on/off, sources per answer (1–15).
+
+---
+
+## API reference
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/search` | Answer a question; returns answer, sources, grounding label, metrics |
+| `POST` | `/search/stream` | Same, as Server-Sent Events: `stage`, `sources`, `token`, `complete`, `error` |
+| `POST` | `/ingest/pdf` | Upload a PDF, TXT or MD file (multipart `file`) |
+| `POST` | `/ingest/texts` | Ingest raw strings |
+| `POST` | `/ingest/directory` | Ingest every supported file in a server-side folder |
+| `GET` | `/documents` | Documents with passage counts, size and citation totals |
+| `GET` | `/documents/{name}/chunks` | Passages, length statistics, histogram and usage counts |
+| `DELETE` | `/documents/{name}` | Remove a document and all of its passages |
+| `GET` | `/health` | Service, database and model status |
+| `GET` | `/metrics` | Latency percentiles, averages and the last 30 queries |
+| `GET` | `/rate-limit` | Caller's quota and the provider's latest quota headers |
+| `GET` | `/insights` | Knowledge gaps and feedback totals |
+| `DELETE` | `/insights/gaps?normalized=…` | Mark a gap resolved |
+| `POST` | `/feedback` | Rate an answer `up` or `down` |
+| `POST` | `/reranker/warmup` | Load the cross-encoder ahead of first use |
+
+Request body for `/search` and `/search/stream`:
+```json
+{ "query": "How many days can I work remotely?", "top_k": 5, "rerank": true,
+  "history": [{ "role": "user", "content": "..." }, { "role": "assistant", "content": "..." }] }
+```
+
+---
+
+## Project structure
+
+```
+Wally-master/
+├── main.py              FastAPI app: retrieval pipeline, streaming, endpoints, Inngest functions
+├── vector_db.py         Qdrant wrapper: embed, search, paginated scroll, delete by document
+├── embeddings.py        Embedding providers (HuggingFace local by default)
+├── reranker.py          Lazy-loaded cross-encoder reranker
+├── llm.py               LLM providers: completion, streaming, token usage, quota headers
+├── telemetry.py         Query metrics, knowledge gaps, feedback, per-client rate limiter
+├── data_loader.py       PDF/TXT/MD loading and sentence-aware chunking with overlap
+├── queries.py           Python interface for scripted use without the API
+├── app.py               Legacy Streamlit UI (optional)
+├── requirements.txt
+├── .env.example
+├── docs/
+│   ├── DEMO_GUIDE.md          Walkthrough and talking points for presentations
+│   └── TECHNICAL_OVERVIEW.md  Background essay on the original design
+└── wally-frontend/      Next.js app
+    ├── app/             layout, global styles, page (state and data flow), fonts
+    ├── components/      Sidebar, Exchange (Q&A), Markdown, DocumentDrawer, Toaster, ui
+    │   └── views/       Ask, Library, Performance, Knowledge gaps, Settings
+    └── lib/api.ts       Typed API client, SSE parser, upload with progress
+```
+
+---
+
+## Metrics explained
+
+| Metric | Meaning | Typical value (laptop CPU) |
+|---|---|---|
+| Embed | Turning the question into a 384-d vector | ~50 ms |
+| Search | Qdrant nearest-neighbour lookup | ~20–40 ms |
+| Rerank | Cross-encoder scoring of 3×top_k passages | ~0.15 s warm |
+| Generate | LLM round trip, first byte to last token | ~1 s |
+| First token | Time from request until the first answer token appears | ~1.1 s |
+| Prompt / completion tokens | Exact counts reported by Groq | ~900 / ~450 |
+| Match | Cosine similarity between question and passage (0–100%) | 25–75% for relevant text |
+| Relevance | Cross-encoder probability that the passage answers the question | close to 0% or 100% |
+
+**Grounding label.** Without reranking, the top match decides: 50% or above is *well grounded*, 25% or above is *partly grounded*, anything lower is *weakly grounded*. With reranking, the thresholds are 70% and 30% on the relevance score.
+
+---
+
+## Design decisions
+
+- **Citations over trust.** The prompt numbers each passage and requires `[n]` citations, so every claim can be checked in one click.
+- **Measure, don't estimate.** Token counts come from the provider's usage field rather than a characters ÷ 4 estimate, and each pipeline stage is timed separately.
+- **Retrieve wide, then rerank narrow.** Vector search is fast but approximate; the cross-encoder is precise but slow. Fetching 3×top_k candidates and reranking them gets the benefits of both.
+- **Re-upload replaces.** Documents are keyed by file name, so updating a policy never leaves stale passages behind.
+- **Degrade gracefully.** Rate-limited questions queue instead of failing; uploads retry; the UI keeps working, and says so, when the API is down.
+- **Quiet interface.** A neutral palette and typographic hierarchy keep attention on the answers and their sources.
+
+---
+
+## Limitations and future work
+
+| Limitation | Possible next step |
+|---|---|
+| Query metrics and rate-limit windows are in memory and reset on restart | Store them in Redis or Postgres |
+| No user accounts or document-level permissions | SSO and per-team collections |
+| Scanned PDFs (images) contain no extractable text | Add OCR (Tesseract) |
+| Character-based chunking | Semantic or heading-aware chunking |
+| Grounding is score-based, not a fact check | Add an LLM-as-judge faithfulness check |
+| English-only embedding model | Multilingual embeddings (e.g. `bge-m3`) |
+
+See [CHANGELOG.md](CHANGELOG.md) for the release history.

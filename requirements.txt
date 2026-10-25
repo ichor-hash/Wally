@@ -1,30 +1,24 @@
 # Core Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-streamlit==1.28.1
-python-dotenv==1.0.0
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+python-dotenv==1.2.4
+streamlit==1.66.1  # legacy UI (app.py); the main UI is wally-frontend/
 
 # Vector Database
-qdrant-client==2.7.0
+qdrant-client==1.20.0
 
-# Embeddings
-sentence-transformers==2.2.2
+# Embeddings + reranking (cross-encoder)
+sentence-transformers==6.2.0
 
 # LLM
-groq==0.4.2
+groq==1.7.0
 
 # PDF Processing
-llama-index-core==0.9.20
-llama-index-readers-file==0.1.4
-pypdf==3.17.1
+pypdf==6.21.2
 
 # Task Scheduling (optional, for event-driven features)
-inngest==0.2.8
+inngest==0.5.19
 
 # HTTP
-requests==2.31.0
-
-# Development (optional)
-pytest==7.4.3
-black==23.12.0
-ruff==0.1.8
+requests==2.34.2

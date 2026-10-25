@@ -18,10 +18,10 @@ class RAGQuery:
     def __init__(
         self,
         collection: str = "docs",
-        embed_provider: str = "groq",
-        embed_model: str = "llama-embeddings-7b-v0",
+        embed_provider: str = "huggingface",
+        embed_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         llm_provider: str = "groq",
-        llm_model: str = "llama-3.1-8b-instant"
+        llm_model: str = "openai/gpt-oss-20b"
     ):
         """
         Initialize RAG query interface.

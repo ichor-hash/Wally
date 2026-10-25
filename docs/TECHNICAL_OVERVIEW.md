@@ -1,3 +1,5 @@
+> **Note:** This is the original design essay, kept for background. Some details (Streamlit UI, LlamaIndex parsing) describe v1. The [README](../README.md) is the current reference.
+
 # Building a Production RAG System: The Real Story
 
 I spent three weeks trying to get GPT-4's API to work for a document Q&A system before I realized my OpenAI credits had run out. Classic. That's when I decided to build this entire system using completely free alternatives, and honestly, it turned out better than I expected.

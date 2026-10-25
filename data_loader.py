@@ -1,20 +1,24 @@
 """
-Document data loader using LlamaIndex.
-Loads PDFs and text files, chunks text, and splits by sentences.
+Document data loader using PyPDF (no llama-index required).
+Loads PDFs and text files, chunks text by character count.
 """
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import re
 
-from llama_index.core import Document
-from llama_index.core.node_parser import SentenceSplitter
-from llama_index.readers.file import PDFReader
+try:
+    from pypdf import PdfReader
+except ImportError:
+    try:
+        from PyPDF2 import PdfReader
+    except ImportError:
+        PdfReader = None
 
 
 class DocumentLoader:
     """
-    Loads PDF and text files, chunks them into sentences.
-    Uses LlamaIndex for both loading and parsing.
+    Loads PDF and text files, chunks them into manageable pieces.
     Supports: .pdf, .txt, .md
     """
     
@@ -25,28 +29,21 @@ class DocumentLoader:
         sentence_splitter: bool = True
     ):
         """
-        Initialize the PDF data loader.
+        Initialize the document loader.
         
         Args:
             chunk_size: Target size for each chunk (in characters)
             chunk_overlap: Overlap between chunks (in characters)
-            sentence_splitter: If True, split at sentence boundaries
+            sentence_splitter: If True, try to split at sentence boundaries
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.sentence_splitter = sentence_splitter
         
-        # Initialize the sentence splitter
-        self.splitter = SentenceSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            # Ensure we split at sentence boundaries
-            separator="\n"
-        )
-        
-        # Initialize PDF reader
-        self.pdf_reader = PDFReader()
+        if PdfReader is None:
+            raise ImportError("pypdf not installed. Run: pip install pypdf")
     
-    def load_text_file(self, file_path: str) -> List[Document]:
+    def load_text_file(self, file_path: str) -> str:
         """
         Load a text file (.txt, .md, etc.).
         
@@ -54,7 +51,7 @@ class DocumentLoader:
             file_path: Path to the text file
             
         Returns:
-            List of LlamaIndex Documents
+            Text content as string
         """
         path = Path(file_path)
         if not path.exists():
@@ -63,17 +60,9 @@ class DocumentLoader:
         with open(path, 'r', encoding='utf-8') as f:
             text = f.read()
         
-        # Create a single document with metadata
-        doc = Document(
-            text=text,
-            metadata={
-                "source_file": path.name,
-                "file_type": path.suffix,
-            }
-        )
-        return [doc]
+        return text
     
-    def load_pdf(self, file_path: str) -> List[Document]:
+    def load_pdf(self, file_path: str) -> str:
         """
         Load a single PDF file.
         
@@ -81,16 +70,23 @@ class DocumentLoader:
             file_path: Path to the PDF file
             
         Returns:
-            List of LlamaIndex Documents
+            Text content as string
         """
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"PDF file not found: {file_path}")
         
-        documents = self.pdf_reader.load_data(file=path)
-        return documents
+        reader = PdfReader(str(path))
+        text_parts = []
+        
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                text_parts.append(text)
+        
+        return "\n\n".join(text_parts)
     
-    def load_file(self, file_path: str) -> List[Document]:
+    def load_file(self, file_path: str) -> str:
         """
         Load any supported file type (auto-detects based on extension).
         
@@ -98,7 +94,7 @@ class DocumentLoader:
             file_path: Path to the file
             
         Returns:
-            List of LlamaIndex Documents
+            Text content as string
         """
         path = Path(file_path)
         suffix = path.suffix.lower()
@@ -110,116 +106,61 @@ class DocumentLoader:
         else:
             raise ValueError(f"Unsupported file type: {suffix}. Supported: .pdf, .txt, .md")
     
-    def load_pdfs(self, directory: str, glob_pattern: str = "*.pdf") -> List[Document]:
+    def chunk_text(self, text: str) -> List[str]:
         """
-        Load all PDF files from a directory.
+        Split text into chunks with overlap.
         
         Args:
-            directory: Directory containing PDF files
-            glob_pattern: Pattern to match PDF files
+            text: Input text to chunk
             
         Returns:
-            List of LlamaIndex Documents
+            List of text chunks
         """
-        dir_path = Path(directory)
-        if not dir_path.exists():
-            raise FileNotFoundError(f"Directory not found: {directory}")
+        if not text:
+            return []
         
-        pdf_files = list(dir_path.glob(glob_pattern))
-        
-        all_documents = []
-        for pdf_file in pdf_files:
-            documents = self.load_pdf(str(pdf_file))
-            # Add source metadata to each document
-            for doc in documents:
-                doc.metadata["source_file"] = pdf_file.name
-            all_documents.extend(documents)
-        
-        return all_documents
-    
-    def load_directory(self, directory: str, glob_pattern: str = "*.*") -> List[Document]:
-        """
-        Load all supported files from a directory.
-        
-        Args:
-            directory: Directory containing files
-            glob_pattern: Pattern to match files (default: *.*)
-            
-        Returns:
-            List of LlamaIndex Documents
-        """
-        dir_path = Path(directory)
-        if not dir_path.exists():
-            raise FileNotFoundError(f"Directory not found: {directory}")
-        
-        files = list(dir_path.glob(glob_pattern))
-        
-        all_documents = []
-        for file_path in files:
-            # Skip directories and unsupported files
-            if file_path.is_dir():
-                continue
-            
-            try:
-                documents = self.load_file(str(file_path))
-                # Add source metadata to each document
-                for doc in documents:
-                    if "source_file" not in doc.metadata:
-                        doc.metadata["source_file"] = file_path.name
-                all_documents.extend(documents)
-            except ValueError as e:
-                # Skip unsupported file types
-                print(f"Skipping {file_path.name}: {e}")
-                continue
-        
-        return all_documents
-    
-    def chunk_documents(self, documents: List[Document]) -> List[Document]:
-        """
-        Split documents into chunks using sentence splitting.
-        Preserves metadata including source_file.
-        
-        Args:
-            documents: List of LlamaIndex Documents
-            
-        Returns:
-            List of chunked Documents with preserved metadata
-        """
-        # The SentenceSplitter handles sentence-aware splitting
-        nodes = self.get_nodes(documents)
-        
-        # Convert nodes back to documents, preserving all metadata
         chunks = []
-        for node in nodes:
-            # Create new document with node text
-            doc = Document(
-                text=node.text,
-                metadata={**node.metadata}  # Preserve all metadata from node
-            )
-            chunks.append(doc)
+        start = 0
+        text_len = len(text)
+        
+        while start < text_len:
+            end = start + self.chunk_size
+            
+            # If sentence splitting is enabled, try to end at sentence boundary
+            if self.sentence_splitter and end < text_len:
+                # Look for sentence endings near the chunk boundary
+                search_start = max(start, end - 100)
+                search_end = min(text_len, end + 100)
+                chunk_portion = text[search_start:search_end]
+                
+                # Find the last sentence ending
+                sentence_ends = [m.end() for m in re.finditer(r'[.!?]\s+', chunk_portion)]
+                if sentence_ends:
+                    # Adjust end to the last sentence boundary
+                    last_sentence = sentence_ends[-1]
+                    end = search_start + last_sentence
+            
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            
+            if end >= text_len:
+                break
+            
+            # Move start position with overlap, always making forward progress
+            next_start = end - self.chunk_overlap
+            start = next_start if next_start > start else end
         
         return chunks
-    
-    def get_nodes(self, documents: List[Document]):
-        """
-        Parse documents into nodes using the sentence splitter.
-        
-        Args:
-            documents: List of LlamaIndex Documents
-            
-        Returns:
-            List of nodes (chunks)
-        """
-        return self.splitter.get_nodes_from_documents(documents)
     
     def load_and_chunk(
         self, 
         file_path: Optional[str] = None, 
         directory: Optional[str] = None,
         glob_pattern: str = "*.*"
-    ) -> List[Document]:
+    ) -> List[Dict[str, Any]]:
         """
-        Convenience method to load and chunk in one step.
+        Load and chunk files, return with metadata.
         
         Args:
             file_path: Path to a single file (PDF or text)
@@ -227,16 +168,57 @@ class DocumentLoader:
             glob_pattern: Pattern for files (default: *.* for all)
             
         Returns:
-            List of chunked Documents
+            List of dicts with 'text' and 'metadata' keys
         """
         if file_path:
-            documents = self.load_file(file_path)
+            path = Path(file_path)
+            text = self.load_file(file_path)
+            chunks = self.chunk_text(text)
+            
+            results = []
+            for i, chunk in enumerate(chunks):
+                results.append({
+                    "text": chunk,
+                    "metadata": {
+                        "source_file": path.name,
+                        "file_type": path.suffix,
+                        "chunk_index": i
+                    }
+                })
+            return results
+            
         elif directory:
-            documents = self.load_directory(directory, glob_pattern)
+            dir_path = Path(directory)
+            if not dir_path.exists():
+                raise FileNotFoundError(f"Directory not found: {directory}")
+            
+            files = list(dir_path.glob(glob_pattern))
+            all_results = []
+            
+            for file_path in files:
+                if file_path.is_dir():
+                    continue
+                
+                try:
+                    text = self.load_file(str(file_path))
+                    chunks = self.chunk_text(text)
+                    
+                    for i, chunk in enumerate(chunks):
+                        all_results.append({
+                            "text": chunk,
+                            "metadata": {
+                                "source_file": file_path.name,
+                                "file_type": file_path.suffix,
+                                "chunk_index": i
+                            }
+                        })
+                except (ValueError, Exception) as e:
+                    print(f"Skipping {file_path.name}: {e}")
+                    continue
+            
+            return all_results
         else:
             raise ValueError("Either file_path or directory must be provided")
-        
-        return self.chunk_documents(documents)
     
     def load_and_chunk_with_metadata(
         self,
@@ -257,19 +239,16 @@ class DocumentLoader:
         Returns:
             List of dicts with 'text' and 'metadata' keys
         """
-        chunks = self.load_and_chunk(file_path=file_path, directory=directory, glob_pattern=glob_pattern)
+        results = self.load_and_chunk(
+            file_path=file_path, 
+            directory=directory, 
+            glob_pattern=glob_pattern
+        )
         
-        results = []
-        for i, chunk in enumerate(chunks):
-            metadata = dict(chunk.metadata) if chunk.metadata else {}
-            if file_metadata:
-                metadata.update(file_metadata)
-            metadata["chunk_index"] = i
-            
-            results.append({
-                "text": chunk.text,
-                "metadata": metadata
-            })
+        # Add additional metadata if provided
+        if file_metadata:
+            for result in results:
+                result["metadata"].update(file_metadata)
         
         return results
 

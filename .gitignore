@@ -1,44 +1,26 @@
-# Python-generated files
+﻿# Python
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
+*.py[cod]
 venv/
+venv_old/
+.venv/
 
-# Environment variables (NEVER commit)
+# Environment
 .env
-.env.local
-.env.*.local
+
+# Backups
+*_backup.py
+*_old/
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
 # OS
 .DS_Store
-Thumbs.db
 
-# Database & Storage
-qdrant_storage/
-*.db
-*.sqlite
+# Test files
+*.pdf
 
-# Logs
-*.log
-logs/
-
-# Temporary files
-*.tmp
-temp/
-
-# Credentials
-credentials.json
-secrets.json
+# Runtime data (knowledge gaps, feedback)
+wally_data/

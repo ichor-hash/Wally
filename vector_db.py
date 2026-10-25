@@ -1,5 +1,7 @@
 from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance, PointStruct
+from qdrant_client.models import (
+    VectorParams, Distance, PointStruct, Filter, FieldCondition, MatchValue, FilterSelector, PayloadSchemaType
+)
 
 
 class QdrantStorage:
@@ -13,6 +15,16 @@ class QdrantStorage:
                 collection_name=self.collection,
                 vectors_config=VectorParams(size=self.dimension, distance=Distance.COSINE)
             )
+        
+        # Keyword index on source_file keeps per-document filters (chunks, delete) fast
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection,
+                field_name="source_file",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+        except Exception:
+            pass
     
     def upsert(self, ids, vectors, payloads):
         """Insert or update vectors in the collection."""
@@ -63,7 +75,10 @@ class RAGVectorDB(QdrantStorage):
         **embed_kwargs
     ):
         # Get embedding provider to determine dimension
-        self.embedder = get_embedding_provider(embed_provider, model_name=embed_model, **embed_kwargs)
+        if embed_provider == "groq":
+            self.embedder = get_embedding_provider(embed_provider, model=embed_model, **embed_kwargs)
+        else:
+            self.embedder = get_embedding_provider(embed_provider, model_name=embed_model, **embed_kwargs)
         dimension = self.embedder.dimension
         
         super().__init__(url=url, collection=collection, dimension=dimension)
@@ -99,6 +114,43 @@ class RAGVectorDB(QdrantStorage):
         self.upsert(ids, vectors, metadata)
         return ids
     
+    def embed_query(self, query: str):
+        """Embed a single query string."""
+        return self.embedder.embed([query])[0]
+
+    def search_by_vector(self, query_vector, top_k: int = 5, filter_query: dict = None):
+        """Search with a pre-computed query vector (lets callers time embedding separately)."""
+        response = self.search(query_vector, top_k=top_k, filter_query=filter_query)
+        points = response.points if hasattr(response, 'points') else response
+        return [{"id": p.id, "score": p.score, "payload": p.payload} for p in points]
+
+    def scroll_all(self, with_payload=True, scroll_filter=None, page_size: int = 1000):
+        """Iterate over every point in the collection (paginates past Qdrant's page limit)."""
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection,
+                limit=page_size,
+                offset=offset,
+                with_payload=with_payload,
+                with_vectors=False,
+                scroll_filter=scroll_filter,
+            )
+            yield from points
+            if offset is None:
+                break
+
+    def delete_by_source(self, source_file: str) -> int:
+        """Delete every chunk belonging to a source file. Returns the number deleted."""
+        source_filter = Filter(must=[FieldCondition(key="source_file", match=MatchValue(value=source_file))])
+        count = self.client.count(collection_name=self.collection, count_filter=source_filter, exact=True).count
+        if count:
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=FilterSelector(filter=source_filter),
+            )
+        return count
+
     def similarity_search(self, query: str, top_k: int = 5, filter_query: dict = None):
         """
         Search by text query (automatically embeds the query).
