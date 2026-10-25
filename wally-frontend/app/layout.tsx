@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Figtree } from "next/font/google";
+import { Figtree, Pixelify_Sans } from "next/font/google";
 import localFont from "next/font/local";
 import { ToastProvider } from "@/components/Toaster";
 import "./globals.css";
@@ -8,6 +8,12 @@ const figtree = Figtree({
   variable: "--font-figtree",
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700"],
+});
+
+const pixel = Pixelify_Sans({
+  variable: "--font-pixelify",
+  subsets: ["latin"],
+  weight: ["500"],
 });
 
 const satoshi = localFont({
@@ -33,7 +39,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${figtree.variable} ${satoshi.variable} h-full`}>
+    <html lang="en" className={`${figtree.variable} ${satoshi.variable} ${pixel.variable} h-full`}>
       <body className="min-h-full font-sans text-[15px] leading-normal">
         <ToastProvider>{children}</ToastProvider>
       </body>

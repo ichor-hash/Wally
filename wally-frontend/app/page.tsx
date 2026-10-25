@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { DocumentDrawer } from "@/components/DocumentDrawer";
 import { Exchange } from "@/components/Exchange";
+import { Wally } from "@/components/mascot/Wally";
 import { Connection, Sidebar, View } from "@/components/Sidebar";
 import { useToast } from "@/components/Toaster";
 import { AskView } from "@/components/views/AskView";
@@ -377,6 +378,8 @@ export default function Home() {
           )}
         </div>
       </main>
+
+      <Wally view={view} />
 
       {drawer && <DocumentDrawer key={drawer.doc} docName={drawer.doc} focusChunkId={drawer.chunkId} recentChunkUse={recentChunkUse} onClose={() => setDrawer(null)} />}
     </div>
