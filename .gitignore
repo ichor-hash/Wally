@@ -23,4 +23,4 @@ venv_old/
 *.pdf
 
 # Runtime data (knowledge gaps, feedback)
-wally_data/
+ethan_data/

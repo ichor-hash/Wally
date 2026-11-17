@@ -471,12 +471,12 @@ CMD ["bash", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port 8001 & stre
 **3. Push to AWS:**
 ```bash
 # Create ECR repository
-aws ecr create-repository --repository-name wally
+aws ecr create-repository --repository-name ethan
 
 # Build and push
-docker build -t wally .
-docker tag wally:latest <your-aws-account>.dkr.ecr.us-east-1.amazonaws.com/wally:latest
-docker push <your-aws-account>.dkr.ecr.us-east-1.amazonaws.com/wally:latest
+docker build -t ethan .
+docker tag ethan:latest <your-aws-account>.dkr.ecr.us-east-1.amazonaws.com/ethan:latest
+docker push <your-aws-account>.dkr.ecr.us-east-1.amazonaws.com/ethan:latest
 
 # Deploy to Fargate via AWS Console or CLI
 ```

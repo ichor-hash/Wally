@@ -1,14 +1,14 @@
-# Demo guide: Wally at Apple
+# Demo guide: Ethan at Apple
 
-A ten-minute live demo. Wally plays the internal knowledge assistant for Apple's finance and investor-relations team, answering from Apple's real annual report (FY2025 Form 10-K, filed with the SEC on 31 October 2025).
+A ten-minute live demo. Ethan plays the internal knowledge assistant for Apple's finance and investor-relations team, answering from Apple's real annual report (FY2025 Form 10-K, filed with the SEC on 31 October 2025).
 
-Every question below was run against this exact setup. The expected answers are what Wally actually returned.
+Every question below was run against this exact setup. The expected answers are what Ethan actually returned.
 
 ---
 
 ## 1. The story in 30 seconds
 
-> Analysts spend hours searching 100-page annual reports. Wally lets them ask questions in plain English and answers only from the filing, with a citation for every claim, so every number can be checked in one click. It also measures itself: how fast, how many tokens, how well grounded. And it tells the team which questions the documents can't answer yet.
+> Analysts spend hours searching 100-page annual reports. Ethan lets them ask questions in plain English and answers only from the filing, with a citation for every claim, so every number can be checked in one click. It also measures itself: how fast, how many tokens, how well grounded. And it tells the team which questions the documents can't answer yet.
 
 ---
 
@@ -29,8 +29,8 @@ Every question below was run against this exact setup. The expected answers are 
 
 | File | What it is | Size | Chunks |
 |---|---|---|---|
-| `demo/apple-fy2025-10k-risk-factors.txt` | Item 1A, Risk Factors | 68k characters | 145 |
-| `demo/apple-fy2025-10k-mdna.txt` | Item 7, MD&A | 18.5k characters | 39 |
+| `demo/apple-fy2025-10k-risk-factors.txt` | Item 1A, Risk Factors | 68k characters | 177 |
+| `demo/apple-fy2025-10k-mdna.txt` | Item 7, MD&A | 18.5k characters | 53, of which 5 are whole tables |
 
 Both were extracted from the SEC filing (`aapl-20250927.htm`, EDGAR) with page footers removed. Nothing was edited.
 
@@ -43,30 +43,29 @@ COMPANY_NAME=Apple Inc.
 COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fiscal 2025 ended September 27, 2025 ...
 ```
 
-`COMPANY_NAME` sets who Wally works for (shown on the Ask screen). `COMPANY_PROFILE` is added to the system prompt as background so Wally understands "this fiscal year" or "segments". It is marked *not citable*, so facts still have to come from the filing.
+`COMPANY_NAME` sets who Ethan works for (shown on the Ask screen). `COMPANY_PROFILE` is added to the system prompt as background so Ethan understands "this fiscal year" or "segments". It is marked *not citable*, so facts still have to come from the filing.
 
 ---
 
 ## 3. Setup checklist
 
 **The night before**
-1. Start Docker Desktop.
-2. Start Qdrant: `docker start eager_leavitt` (your existing container). Check <http://localhost:6333/dashboard>.
-3. Backend, in the project folder:
+1. Backend, in the project folder (no Docker needed; Qdrant runs inside it):
    ```
    .\venv\Scripts\python.exe -m uvicorn main:app --port 8001
    ```
-4. Frontend:
+2. Frontend:
    ```
-   cd wally-frontend
+   cd ethan-frontend
    npm run dev
    ```
-5. Do one full rehearsal using section 4, then clear the library (Library → Remove) so you can upload live.
+3. Do one full rehearsal using section 4, then clear the library (Library → Remove) so you can upload live.
+4. Run `.\venv\Scripts\python.exe evals\run_evals.py` so the **Evaluation** page shows a fresh report.
 
 **Ten minutes before**
 1. Open <http://localhost:3000> in a **maximised** window. The quota and token panel only shows on wide screens.
 2. Check the sidebar foot reads **Online**.
-3. **Settings:** turn **Rerank chunks** on (loads the model now, not during the demo) and leave sources per answer at **5**.
+3. **Settings:** search mode **Hybrid**, **Rerank chunks** on (the default), sources per answer **5**, and **Charts and tables** on.
 4. Ask one throwaway question to warm everything up, then click **Clear conversation**.
 5. Keep File Explorer open at the `demo` folder for drag-and-drop.
 
@@ -76,8 +75,8 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 
 | # | Do | Say | Expect |
 |---|---|---|---|
-| 1 | Show the Ask screen | "This is Wally, configured as Apple's internal knowledge assistant. The library is empty." | "Knowledge assistant for Apple Inc." above the heading |
-| 2 | **Library** → drag in both `demo` files | "These are two sections of Apple's real 10-K. Each file is split into overlapping ~512-character chunks, embedded locally into 384-number vectors, and stored in Qdrant." | 145 and 39 chunks, about 2 seconds each |
+| 1 | Show the Ask screen | "This is Ethan, configured as Apple's internal knowledge assistant. The library is empty." | "Knowledge assistant for Apple Inc." above the heading |
+| 2 | **Library** → drag in both `demo` files | "These are two sections of Apple's real 10-K. Each file is split into chunks of about 512 characters along its structure, so every table stays whole. Each chunk gets a 384-number meaning vector and a keyword vector, stored in Qdrant." | 177 and 53 chunks, a few seconds each |
 | 3 | Click `apple-fy2025-10k-mdna.txt` | "This is exactly what the model gets to see: every chunk, its length, and later which chunks get cited." | Document preview |
 
 ### Question 1: Risk Factors
@@ -102,7 +101,7 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 
 **Expect:** *Well grounded.* Tariffs announced from the second quarter of 2025 on imports from China, India, Japan, South Korea, Taiwan, Vietnam and the EU; impact on the supply chain and results. **Sources come from both files.**
 
-**Say:** "Open **Sources**: chunks from MD&A *and* Risk Factors. Wally combined two sections of the report into one answer."
+**Say:** "Open **Sources**: chunks from MD&A *and* Risk Factors. Ethan combined two sections of the report into one answer."
 
 ### Question 4: out of scope
 
@@ -112,62 +111,71 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 
 **Say:** "It refuses instead of making something up. Now look at **Knowledge gaps**." *(Open it.)* "The question was logged automatically, so the documentation team knows what to add next."
 
-### Question 5: the limitation (tables)
+### Question 5: the table that used to fail
 
 **Ask:** `Which reportable segment grew fastest in 2025, and by how much?`
 
-**Expect:** Wally says **Europe, +10%**, labelled *Well grounded*. **This is wrong.** The correct answer is **Japan, +15%**.
+**Expect:** *Well grounded.* **Japan, +15%.**
 
-**Say:** "This is the most important slide. It looks confident, but it's wrong. Let me show you why."
-*(Library → `apple-fy2025-10k-mdna.txt` → search **Japan**.)*
+**Say:** "This one is my favourite, because the first version got it wrong. It said Europe, +10%, and labelled that *well grounded*."
+*(Library → `apple-fy2025-10k-mdna.txt` → find the segment table.)*
+- Fixed-size chunks had cut the segment table in two: the title and two rows in one chunk, Japan's row in the next. The model only saw half the table.
+- Now the chunker keeps every table whole, with its caption. "And I know it's fixed because it's in the evaluation set, which runs on every commit."
 
-**Explain, then continue with section 5:**
-- The segment table was split across **two chunks**. Chunk 8 has the table title and only the Americas and Europe rows. Chunk 9 has Japan (+15%) but no title.
-- Retrieval matched the question to the chunk with the title, so the model only saw two rows and picked the larger.
-- The grounding label measures *retrieval relevance*, not *answer correctness*, so it can't catch this.
+### Question 6: a chart
+
+**Ask:** `Chart net sales by reportable segment for 2025.`
+
+**Expect:** a written, cited answer plus a bar chart, drawn with OpenUI from the numbers in the cited chunk.
+
+**Say:** "The model can add a chart when an answer compares numbers. It may only use display components, and only numbers that are in the sources."
+
+### Question 7: an exact term
+
+**Ask:** `ASU 2025-06 effective date`
+
+**Expect:** *First quarter of 2029.* Open **Sources**: the top chunk says *via meaning + keywords*.
+
+**Say:** "Pure vector search is fuzzy with codes like this. Ethan also runs a keyword search and merges the two rankings, which is hybrid retrieval. In the evaluation it found 11 of 11 exact-term questions."
 
 ### Finish (1 minute)
 
-1. **Performance** tab: "Median response about 1.1 s. Embedding and search take milliseconds; almost all the time is the language model."
-2. Sidebar foot: "Rate limiting per user, plus Groq's own token quota, live. Over the limit, questions queue instead of failing."
-3. **Settings**: "Reranking, streaming and source count are all switchable."
-4. **Wally**: click the mascot in the corner, then press **Shift + W**. "And this is Wally. He hunts hallucinations." He charges across the screen firing lightning. End on a smile.
+1. **Evaluation** tab: "36 questions with known answers. The first version passed 29; this one passes 35, and catches every question the documents can't answer. CI fails the build if that drops."
+2. **Performance** tab: "Embedding and search take milliseconds; almost all the time is the language model. Scroll down: tokens and cost per question, and what the cache saved."
+3. Sidebar foot: "Rate limiting per user, plus Groq's own token quota, live. Over the limit, questions queue instead of failing."
+4. **Settings**: "Search mode, reranking, charts and source count are all switchable."
+5. **Ethan**: click the mascot in the corner, then press **Shift + E**. "And this is Ethan. He hunts hallucinations." He charges across the screen firing lightning. End on a smile.
 
 **Closing line:**
-> Wally answers from the documents, proves every claim, measures itself, admits what it doesn't know, and I can show you exactly where it still fails and how I'd fix it.
+> Ethan answers from the documents, proves every claim, measures itself, admits what it doesn't know, and has the evaluation to show what improved and what still fails.
 
 ---
 
-## 5. The limitation, and how to fix it
+## 5. What changed since the first version, and what is left
 
-| | |
-|---|---|
-| **What happened** | A table was split across chunks. Retrieval found the half with the title, the model answered from incomplete data, and the confidence label stayed high. |
-| **Root cause** | Character-based chunking treats a table like prose, and plain-text extraction keeps the numbers but loses the column headers. |
-| **Fix 1: structure-aware chunking** | Never split inside a table; keep each table, with its title and column headers, as one chunk. |
-| **Fix 2: structured data** | Every 10-K also ships as **XBRL**, machine-readable financial data. Load the tables into a database and let the model query it (text-to-SQL) instead of reading flattened text. |
-| **Fix 3: compute, don't guess** | For "fastest", "growth" or "ratio" questions, have the model call a calculator or Python tool on the extracted numbers. |
-| **Fix 4: better confidence** | Add an answer-checking step (an LLM judge or an NLI model) that verifies each claim against its cited chunk, instead of relying only on retrieval scores. |
-
----
-
-## 6. Evaluation: what I tested
-
-Seven questions with answers checked by hand against the filing:
-
-| Question | Grounding | Correct? |
+| | First version | Now |
 |---|---|---|
-| Outsourcing and single-source supplier risks | Well (0.76) | ✓ |
-| Why Greater China net sales declined | Well (1.00) | ✓ |
-| How U.S. tariffs affected Apple | Well (0.99) | ✓ |
-| Why Services gross margin % increased | Well (1.00) | ✓ |
-| Share repurchases and dividends in 2025 | Well (0.99) | ✓ ($89.3B repurchased, $15.4B dividends) |
-| Parental leave policy (not in documents) | Weak (0.00) | ✓ refused correctly |
-| Fastest-growing segment (table) | Well (0.81) | ✗ said Europe +10%, actually Japan +15% |
+| Chunking | Fixed 512-character windows; tables cut in half | Structure-aware; each table whole with its caption |
+| Retrieval | Vector similarity only | Hybrid: vectors + BM25 keywords, merged by reciprocal rank fusion |
+| Reranking | Optional | On by default; drives the grounding label |
+| Fastest-segment question | "Europe, +10%", wrong | "Japan, +15%", correct |
+| Evaluation | 7 questions, checked by hand | 36 questions, automatic, in CI |
 
-**6 of 7 correct (86%).** The failure is systematic (tables), not random, which is why it can be fixed.
+**Still open:** one paraphrased question (*"What is the risk if important employees leave?"*) is missed by every setup; the grounding label measures relevance, not correctness; and numbers that span several tables are still read, not computed. Next steps: a stronger embedding model, an answer-verification step, and XBRL data with a calculator tool for financial questions.
 
-Backup questions if you have time: *"Why did the Services gross margin percentage increase in 2025?"* and *"What drove Japan's net sales increase in 2025?"* (iPhone, Services and iPad).
+---
+
+## 6. Evaluation
+
+Full details: [EVALUATION.md](EVALUATION.md).
+
+| Retrieval setup | Passed (of 36) | Right chunk first | Unanswerable caught |
+|---|---|---|---|
+| First version | 29 | 53% | 1 of 4 |
+| Hybrid | 31 | 75% | 1 of 4 |
+| **Hybrid + reranker** | **35** | **91%** | **4 of 4** |
+
+Generated answers, graded automatically: **27 of 27** correct now, 24 of 27 with the first version's retrieval.
 
 ---
 
@@ -198,7 +206,7 @@ The embedder encodes question and chunk *separately*: fast but approximate. The 
 Three layers. (1) The prompt allows only the numbered chunks and requires a citation for every claim. (2) A grounding label warns when retrieval was weak. (3) Weak questions are logged as knowledge gaps. The table case shows the remaining risk, and the fix is answer verification (section 5).
 
 **How did you evaluate it?**
-A hand-checked test set (section 6): 6 of 7 correct, with a systematic failure on tables. Next step: a larger test set scored automatically with RAGAS metrics (faithfulness, answer relevance, context recall).
+A golden set of 36 questions in four types (paraphrased, exact terms, tables, unanswerable), scored automatically at two levels: does retrieval find the chunk with the answer, and is the generated answer right and cited. It runs in GitHub Actions on every push and fails the build on a regression (section 6).
 
 **Which model, and why?**
 `gpt-oss-20b`, an open-weight model, served by Groq: free tier and very fast (about 1 second per answer). Each provider sits behind an interface in `llm.py` and `embeddings.py`, so swapping models is a one-line change.
@@ -207,7 +215,7 @@ A hand-checked test set (section 6): 6 of 7 correct, with a systematic failure o
 Embedding, search and reranking run locally. Only the 5 retrieved chunks and the question are sent to Groq to write the answer. For strict confidentiality, swap in a self-hosted model; the interface already supports that.
 
 **What does it cost?**
-Zero in this setup: local embeddings, self-hosted Qdrant, Groq free tier. A typical question uses about 1,000–1,500 tokens.
+Zero in this setup: local embeddings and reranking, embedded Qdrant, Groq free tier. A typical question uses about 900 tokens, and repeated questions come from a cache at no cost. With paid prices set, the Performance page shows cost per question; [COSTS.md](COSTS.md) has the formula.
 
 **How fast is it?**
 About 1–2 seconds end to end. Measured on this laptop over 10 questions: embedding about 20 ms, search about 25 ms, reranking about 0.3 s, generation about 0.9 s, total median 1.1 s. With streaming, the first words appear in about 1 second.
@@ -228,7 +236,7 @@ The pipeline is small enough to write directly, which makes every step visible a
 Making the system honest about itself: real streaming with exact token usage, per-stage timing, and finding the table failure and tracing it to chunking.
 
 **What would you build next?**
-Table-aware chunking and XBRL ingestion, automated evaluation with RAGAS, hybrid keyword-plus-vector search for exact terms, and per-team access control.
+Answer verification against cited chunks, XBRL ingestion with a calculator tool for financial questions, a stronger embedding model, and per-team access control.
 
 ---
 
@@ -256,8 +264,8 @@ Table-aware chunking and XBRL ingestion, automated evaluation with RAGAS, hybrid
 | Symptom | Fix |
 |---|---|
 | Sidebar says **API offline** | Restart the backend (section 3, step 3) |
-| **Database offline** | Docker Desktop is running? `docker start eager_leavitt` |
-| First reranked answer is slow | The reranker was loading. Toggle it on in Settings before the demo. |
+| **Database offline** | Another backend window is holding the embedded database; close it and restart the backend |
+| First answer is slow | The reranker loads when the page first opens; ask a warm-up question before the demo. |
 | "Rate limit reached" | Wait for the queue; it sends automatically. Mention it as a feature. |
 | Token quota not visible | Maximise the window, and ask one question first (it comes from Groq's response) |
 | Answer wording differs slightly from this guide | Normal: the model is not deterministic. The cited chunks will be the same. |

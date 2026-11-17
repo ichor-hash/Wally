@@ -52,7 +52,8 @@ class HuggingFaceEmbeddings(EmbeddingProvider):
     
     @property
     def dimension(self) -> int:
-        return self.model.get_sentence_embedding_dimension()
+        get = getattr(self.model, "get_embedding_dimension", None) or self.model.get_sentence_embedding_dimension
+        return get()
     
     def embed(self, texts: List[str]) -> List[List[float]]:
         return self.model.encode(texts, convert_to_numpy=True).tolist()

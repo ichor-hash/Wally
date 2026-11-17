@@ -1,6 +1,13 @@
 """
-LLM providers for RAG system.
-Supports Groq and OpenRouter for cloud inference.
+LLM providers for Ethan.
+
+- groq:              Groq cloud (default; free tier)
+- openrouter:        OpenRouter cloud
+- openai_compatible: any server that speaks the OpenAI chat-completions API.
+                     Point LLM_BASE_URL at Ollama, LM Studio, vLLM or llama.cpp
+                     and no text leaves your machine and no tokens are billed.
+
+Selected with LLM_PROVIDER / LLM_MODEL / LLM_BASE_URL / LLM_API_KEY (see .env.example).
 
 Every provider exposes:
 - chat(): plain completion, returns text
@@ -119,6 +126,19 @@ class GroqLLM(LLMProvider):
         self.client = groq.Groq(api_key=api_key)
         self.model = model
 
+    def _extra(self, model: Optional[str]) -> Dict[str, Any]:
+        """
+        gpt-oss models reason before answering, and those hidden tokens are billed
+        and count against max_tokens. Grounded Q&A over five chunks needs little
+        deliberation, so the default is "low": cheaper, faster, and it stops long
+        reasoning from eating the whole output budget and returning an empty answer.
+        Override with LLM_REASONING_EFFORT=medium|high, or set it empty to send nothing.
+        """
+        effort = os.getenv("LLM_REASONING_EFFORT", "low").strip().lower()
+        if effort and "gpt-oss" in (model or self.model):
+            return {"reasoning_effort": effort}
+        return {}
+
     def chat_with_usage(
         self,
         messages: List[dict],
@@ -130,7 +150,8 @@ class GroqLLM(LLMProvider):
             model=model or self.model,
             messages=messages,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            extra_body=self._extra(model) or None,
         )
         self._capture_limits(raw.headers)
         response = raw.parse()
@@ -149,7 +170,7 @@ class GroqLLM(LLMProvider):
             temperature=temperature,
             max_tokens=max_tokens,
             stream=True,
-            extra_body={"stream_options": {"include_usage": True}},
+            extra_body={"stream_options": {"include_usage": True}, **self._extra(model)},
         )
         self._capture_limits(raw.headers)
         usage = {}
@@ -181,6 +202,7 @@ class OpenRouterLLM(LLMProvider):
 
     provider_name = "OpenRouter"
     URL = "https://openrouter.ai/api/v1/chat/completions"
+    STREAM_EXTRAS = {"usage": {"include": True}}  # asks for token usage on the final stream chunk
 
     def __init__(self, model: str = "google/gemma-2-9b-it"):
         super().__init__()
@@ -192,10 +214,10 @@ class OpenRouterLLM(LLMProvider):
         self.model = model
 
     def _headers(self):
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     def chat_with_usage(
         self,
@@ -240,7 +262,7 @@ class OpenRouterLLM(LLMProvider):
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "stream": True,
-                "usage": {"include": True},
+                **self.STREAM_EXTRAS,
             },
             stream=True,
             timeout=120,
@@ -265,6 +287,39 @@ class OpenRouterLLM(LLMProvider):
         yield "usage", usage
 
 
+class OpenAICompatibleLLM(OpenRouterLLM):
+    """
+    Any OpenAI-compatible chat-completions endpoint, typically a local model server.
+
+    Ollama:    LLM_BASE_URL=http://localhost:11434/v1   LLM_MODEL=llama3.2:3b
+    LM Studio: LLM_BASE_URL=http://localhost:1234/v1
+    vLLM:      LLM_BASE_URL=http://localhost:8000/v1
+
+    LLM_API_KEY is optional; local servers ignore it.
+    """
+
+    provider_name = "OpenAI-compatible"
+    STREAM_EXTRAS = {"stream_options": {"include_usage": True}}
+
+    def __init__(self, model: Optional[str] = None, base_url: Optional[str] = None, api_key: Optional[str] = None):
+        LLMProvider.__init__(self)
+        base_url = (base_url or os.getenv("LLM_BASE_URL") or "http://localhost:11434/v1").rstrip("/")
+        self.URL = f"{base_url}/chat/completions"
+        self.api_key = api_key or os.getenv("LLM_API_KEY", "")
+        self.model = model or "llama3.2:3b"
+        self.provider_name = "Ollama" if ":11434" in base_url else "OpenAI-compatible"
+
+
+DEFAULT_MODELS = {"groq": "openai/gpt-oss-20b", "openrouter": "google/gemma-2-9b-it", "openai_compatible": "llama3.2:3b"}
+
+
+def llm_from_env() -> LLMProvider:
+    """Build the provider named by LLM_PROVIDER (default groq), with LLM_MODEL if set."""
+    provider = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+    model = os.getenv("LLM_MODEL", "").strip() or DEFAULT_MODELS.get(provider)
+    return get_llm_provider(provider, model=model)
+
+
 def get_llm_provider(provider: str = "groq", **kwargs) -> LLMProvider:
     """
     Factory function to get LLM provider.
@@ -283,6 +338,7 @@ def get_llm_provider(provider: str = "groq", **kwargs) -> LLMProvider:
     providers = {
         "groq": GroqLLM,
         "openrouter": OpenRouterLLM,
+        "openai_compatible": OpenAICompatibleLLM,
     }
 
     if provider not in providers:

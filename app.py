@@ -12,7 +12,7 @@ from pathlib import Path
 API_URL = "http://localhost:8001"
 
 st.set_page_config(
-    page_title="Wally - RAG Chat",
+    page_title="Ethan - RAG Chat",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -69,7 +69,7 @@ def delete_document(doc_id):
 # ============================================================
 # HEADER
 # ============================================================
-st.title("Wally")
+st.title("Ethan")
 st.caption("Your documents, smarter. Ask anything.")
 
 # ============================================================

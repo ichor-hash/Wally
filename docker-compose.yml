@@ -1,0 +1,43 @@
+# Everything on one machine:  docker compose up -d --build
+# Then open http://localhost:3000. Put GROQ_API_KEY (or a local model, see docs/HOSTING.md) in .env first.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.20.2
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # Not published: only the API talks to Qdrant. Add "6333:6333" to use the dashboard.
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_PATH: ""
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    volumes:
+      - ethan_data:/data
+    ports:
+      - "8001:8001"
+    depends_on:
+      - qdrant
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  web:
+    build:
+      context: ./ethan-frontend
+      args:
+        NEXT_PUBLIC_API_BASE: ${PUBLIC_API_URL:-http://localhost:8001}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  qdrant_data:
+  ethan_data:

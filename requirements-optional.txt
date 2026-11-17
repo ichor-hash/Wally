@@ -1,0 +1,5 @@
+# Event-driven ingestion and search (set INNGEST_ENABLED=true)
+inngest==0.5.19
+
+# Legacy Streamlit UI (app.py); the main interface is ethan-frontend/
+streamlit==1.66.1

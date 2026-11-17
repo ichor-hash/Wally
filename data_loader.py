@@ -1,321 +1,291 @@
 """
-Document data loader using PyPDF (no llama-index required).
-Loads PDFs and text files, chunks text by character count.
+Document loading and chunking (PDF, TXT, Markdown) with pypdf, no framework.
+
+Two chunking strategies:
+
+- "structure" (default): split on blank lines, keep each table together with its
+  caption, keep a heading with the text under it, and pack paragraphs up to the
+  chunk size. Long paragraphs fall back to sentence-aware splitting.
+- "fixed": the original sliding window of chunk_size characters with overlap.
+
+Structure-aware chunking exists because of a measured failure: a fixed window cut
+Apple's segment table in half, the model saw two of five rows and answered
+confidently and wrongly. See docs/EVALUATION.md.
 """
-import os
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 try:
     from pypdf import PdfReader
 except ImportError:
-    try:
-        from PyPDF2 import PdfReader
-    except ImportError:
-        PdfReader = None
+    PdfReader = None
+
+TEXT_SUFFIXES = (".txt", ".md", ".markdown", ".text")
+MIN_CHUNK_CHARS = 120
+TABLE_MAX_FACTOR = 4  # a table may grow to this many chunk sizes before it is split by rows
+
+
+def _is_row(block: str) -> bool:
+    return " | " in block or block.lstrip().startswith("|")
+
+
+def _is_heading(block: str) -> bool:
+    """A short single line without sentence punctuation: 'Gross Margin', '## Equipment'."""
+    if "\n" in block or len(block) > 90:
+        return False
+    if block.startswith("#"):
+        return True
+    if re.match(r"\s*([•\-*–]|\d+[.)])\s*\S", block):  # a list item, not a heading
+        return False
+    return not re.search(r"[.!?:;,]$", block)
 
 
 class DocumentLoader:
-    """
-    Loads PDF and text files, chunks them into manageable pieces.
-    Supports: .pdf, .txt, .md
-    """
-    
-    def __init__(
-        self,
-        chunk_size: int = 512,
-        chunk_overlap: int = 50,
-        sentence_splitter: bool = True
-    ):
-        """
-        Initialize the document loader.
-        
-        Args:
-            chunk_size: Target size for each chunk (in characters)
-            chunk_overlap: Overlap between chunks (in characters)
-            sentence_splitter: If True, try to split at sentence boundaries
-        """
+    """Loads PDF and text files and chunks them. Supports .pdf, .txt, .md"""
+
+    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50, sentence_splitter: bool = True, strategy: str = "structure"):
+        if strategy not in ("structure", "fixed"):
+            raise ValueError("strategy must be 'structure' or 'fixed'")
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.sentence_splitter = sentence_splitter
-        
-        if PdfReader is None:
-            raise ImportError("pypdf not installed. Run: pip install pypdf")
-    
+        self.strategy = strategy
+
+    # ---------------- loading ----------------
     def load_text_file(self, file_path: str) -> str:
-        """
-        Load a text file (.txt, .md, etc.).
-        
-        Args:
-            file_path: Path to the text file
-            
-        Returns:
-            Text content as string
-        """
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"Text file not found: {file_path}")
-        
-        with open(path, 'r', encoding='utf-8') as f:
-            text = f.read()
-        
-        return text
-    
+        return path.read_text(encoding="utf-8")
+
     def load_pdf(self, file_path: str) -> str:
-        """
-        Load a single PDF file.
-        
-        Args:
-            file_path: Path to the PDF file
-            
-        Returns:
-            Text content as string
-        """
+        if PdfReader is None:
+            raise ImportError("pypdf not installed. Run: pip install pypdf")
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"PDF file not found: {file_path}")
-        
-        reader = PdfReader(str(path))
-        text_parts = []
-        
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                text_parts.append(text)
-        
-        return "\n\n".join(text_parts)
-    
+        pages = (page.extract_text() for page in PdfReader(str(path)).pages)
+        return "\n\n".join(text for text in pages if text)
+
     def load_file(self, file_path: str) -> str:
-        """
-        Load any supported file type (auto-detects based on extension).
-        
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            Text content as string
-        """
-        path = Path(file_path)
-        suffix = path.suffix.lower()
-        
-        if suffix == '.pdf':
+        suffix = Path(file_path).suffix.lower()
+        if suffix == ".pdf":
             return self.load_pdf(file_path)
-        elif suffix in ['.txt', '.md', '.markdown', '.text']:
+        if suffix in TEXT_SUFFIXES:
             return self.load_text_file(file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {suffix}. Supported: .pdf, .txt, .md")
-    
+        raise ValueError(f"Unsupported file type: {suffix}. Supported: .pdf, .txt, .md")
+
+    # ---------------- chunking ----------------
     def chunk_text(self, text: str) -> List[str]:
-        """
-        Split text into chunks with overlap.
-        
-        Args:
-            text: Input text to chunk
-            
-        Returns:
-            List of text chunks
-        """
+        """Sliding window of chunk_size characters with overlap, ending on sentence boundaries."""
         if not text:
             return []
-        
-        chunks = []
-        start = 0
-        text_len = len(text)
-        
+        chunks, start, text_len = [], 0, len(text)
         while start < text_len:
             end = start + self.chunk_size
-            
-            # If sentence splitting is enabled, try to end at sentence boundary
             if self.sentence_splitter and end < text_len:
-                # Look for sentence endings near the chunk boundary
                 search_start = max(start, end - 100)
-                search_end = min(text_len, end + 100)
-                chunk_portion = text[search_start:search_end]
-                
-                # Find the last sentence ending
-                sentence_ends = [m.end() for m in re.finditer(r'[.!?]\s+', chunk_portion)]
+                portion = text[search_start:min(text_len, end + 100)]
+                sentence_ends = [m.end() for m in re.finditer(r"[.!?]\s+", portion)]
                 if sentence_ends:
-                    # Adjust end to the last sentence boundary
-                    last_sentence = sentence_ends[-1]
-                    end = search_start + last_sentence
-            
+                    end = search_start + sentence_ends[-1]
+                else:
+                    space = text.rfind(" ", start + 1, end)  # never cut inside a word
+                    if space > start:
+                        end = space + 1
             chunk = text[start:end].strip()
             if chunk:
                 chunks.append(chunk)
-            
             if end >= text_len:
                 break
-            
-            # Move start position with overlap, always making forward progress
             next_start = end - self.chunk_overlap
-            start = next_start if next_start > start else end
-        
+            if next_start > start:
+                space = text.find(" ", next_start, end)  # start the overlap on a word boundary
+                start = space + 1 if space != -1 else next_start
+            else:
+                start = end  # always move forward
         return chunks
-    
-    def load_and_chunk(
-        self, 
-        file_path: Optional[str] = None, 
-        directory: Optional[str] = None,
-        glob_pattern: str = "*.*"
-    ) -> List[Dict[str, Any]]:
-        """
-        Load and chunk files, return with metadata.
-        
-        Args:
-            file_path: Path to a single file (PDF or text)
-            directory: Path to directory with files
-            glob_pattern: Pattern for files (default: *.* for all)
-            
-        Returns:
-            List of dicts with 'text' and 'metadata' keys
-        """
+
+    def _blocks(self, text: str) -> List[Dict[str, Any]]:
+        """Split into paragraphs, merging table rows (and their caption) into single blocks."""
+        raw = [b.strip() for b in re.split(r"\n\s*\n", text.replace("\r", "")) if b.strip()]
+        blocks: List[Dict[str, Any]] = []
+        i = 0
+        while i < len(raw):
+            if not _is_row(raw[i]):
+                blocks.append({"text": raw[i], "kind": "heading" if _is_heading(raw[i]) else "text"})
+                i += 1
+                continue
+            rows = []
+            while i < len(raw):
+                # Short label lines inside a table ("Gross margin:") stay with it
+                label = len(raw[i]) < 60 and i + 1 < len(raw) and _is_row(raw[i + 1])
+                if not (_is_row(raw[i]) or label):
+                    break
+                rows.append(raw[i])
+                i += 1
+            caption = ""
+            if blocks and blocks[-1]["kind"] == "text" and blocks[-1]["text"].endswith(":") and len(blocks[-1]["text"]) < 300:
+                caption = blocks.pop()["text"]
+            blocks.append({"text": "\n".join(([caption] if caption else []) + rows), "kind": "table", "caption": caption, "rows": rows})
+        return blocks
+
+    def chunk_structured(self, text: str) -> List[Dict[str, Any]]:
+        """Structure-aware chunks: [{"text", "section", "kind"}]."""
+        chunks: List[Dict[str, Any]] = []
+        buffer: List[str] = []
+        section = ""
+        buffer_section = ""
+
+        def flush():
+            nonlocal buffer
+            if buffer:
+                chunks.append({"text": "\n\n".join(buffer), "section": buffer_section, "kind": "text"})
+                buffer = []
+
+        blocks = self._blocks(text)
+        for idx, block in enumerate(blocks):
+            body = block["text"]
+            if block["kind"] == "heading":
+                # A heading starts a new chunk and travels with what follows.
+                # Stacked headings (section, then sub-section) stay together.
+                if not (buffer and all(_is_heading(b) for b in buffer)):
+                    flush()
+                section = body.lstrip("# ").strip()
+                buffer, buffer_section = buffer + [body], section
+                continue
+
+            if block["kind"] == "table":
+                heading = buffer if buffer and all(_is_heading(b) for b in buffer) else []
+                if not heading:
+                    flush()
+                prefix = "\n\n".join(heading)
+                buffer = []
+                if len(body) <= self.chunk_size * TABLE_MAX_FACTOR:
+                    pieces = [body]
+                else:
+                    # Oversized table: split by rows, repeating the caption so every piece is self-describing
+                    pieces, current = [], [block["caption"]] if block["caption"] else []
+                    for row in block["rows"]:
+                        if current and sum(len(r) + 1 for r in current) + len(row) > self.chunk_size * 2:
+                            pieces.append("\n".join(current))
+                            current = [block["caption"]] if block["caption"] else []
+                        current.append(row)
+                    pieces.append("\n".join(current))
+                for n, piece in enumerate(pieces):
+                    chunks.append({"text": f"{prefix}\n\n{piece}" if prefix and n == 0 else piece, "section": section, "kind": "table"})
+                continue
+
+            if len(body) > self.chunk_size:
+                heading = buffer if buffer and all(_is_heading(b) for b in buffer) else []
+                if not heading:
+                    flush()
+                buffer = []
+                for n, piece in enumerate(self.chunk_text(body)):
+                    lead = "\n\n".join(heading) + "\n\n" if heading and n == 0 else ""
+                    chunks.append({"text": lead + piece, "section": section, "kind": "text"})
+                continue
+
+            if buffer and sum(len(b) + 2 for b in buffer) + len(body) > self.chunk_size:
+                # A trailing label ("Fourth Quarter 2025:") belongs with the list it introduces
+                label = buffer.pop() if len(buffer) > 1 and buffer[-1].endswith(":") and len(buffer[-1]) < 80 else None
+                flush()
+                if label:
+                    buffer, buffer_section = [label], section
+            if not buffer:
+                buffer_section = section
+            buffer.append(body)
+        flush()
+
+        # Fold fragments too small to mean anything on their own into a neighbour
+        merged: List[Dict[str, Any]] = []
+        for c in chunks:
+            if not c["text"].strip():
+                continue
+            prev = merged[-1] if merged else None
+            small = prev and min(len(prev["text"]), len(c["text"])) < MIN_CHUNK_CHARS
+            if small and prev["kind"] == c["kind"] == "text" and len(prev["text"]) + len(c["text"]) <= self.chunk_size * 1.5:
+                prev["text"] += "\n\n" + c["text"]
+            else:
+                merged.append(c)
+        return merged
+
+    def chunk(self, text: str) -> List[Dict[str, Any]]:
+        if self.strategy == "structure":
+            return self.chunk_structured(text)
+        return [{"text": t, "section": "", "kind": "text"} for t in self.chunk_text(text)]
+
+    # ---------------- load + chunk ----------------
+    def _chunks_for(self, path: Path) -> List[Dict[str, Any]]:
+        return [
+            {
+                "text": c["text"],
+                "metadata": {
+                    "source_file": path.name,
+                    "file_type": path.suffix,
+                    "chunk_index": i,
+                    "section": c["section"],
+                    "kind": c["kind"],
+                },
+            }
+            for i, c in enumerate(self.chunk(self.load_file(str(path))))
+        ]
+
+    def load_and_chunk(self, file_path: Optional[str] = None, directory: Optional[str] = None, glob_pattern: str = "*.*") -> List[Dict[str, Any]]:
+        """Load one file or every supported file in a directory. Returns [{"text", "metadata"}]."""
         if file_path:
-            path = Path(file_path)
-            text = self.load_file(file_path)
-            chunks = self.chunk_text(text)
-            
-            results = []
-            for i, chunk in enumerate(chunks):
-                results.append({
-                    "text": chunk,
-                    "metadata": {
-                        "source_file": path.name,
-                        "file_type": path.suffix,
-                        "chunk_index": i
-                    }
-                })
-            return results
-            
-        elif directory:
-            dir_path = Path(directory)
-            if not dir_path.exists():
-                raise FileNotFoundError(f"Directory not found: {directory}")
-            
-            files = list(dir_path.glob(glob_pattern))
-            all_results = []
-            
-            for file_path in files:
-                if file_path.is_dir():
-                    continue
-                
-                try:
-                    text = self.load_file(str(file_path))
-                    chunks = self.chunk_text(text)
-                    
-                    for i, chunk in enumerate(chunks):
-                        all_results.append({
-                            "text": chunk,
-                            "metadata": {
-                                "source_file": file_path.name,
-                                "file_type": file_path.suffix,
-                                "chunk_index": i
-                            }
-                        })
-                except (ValueError, Exception) as e:
-                    print(f"Skipping {file_path.name}: {e}")
-                    continue
-            
-            return all_results
-        else:
+            return self._chunks_for(Path(file_path))
+        if not directory:
             raise ValueError("Either file_path or directory must be provided")
-    
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Directory not found: {directory}")
+        results: List[Dict[str, Any]] = []
+        for path in sorted(dir_path.glob(glob_pattern)):
+            if path.is_dir():
+                continue
+            try:
+                results.extend(self._chunks_for(path))
+            except Exception as e:
+                print(f"Skipping {path.name}: {e}")
+        return results
+
     def load_and_chunk_with_metadata(
         self,
         file_path: Optional[str] = None,
         directory: Optional[str] = None,
         glob_pattern: str = "*.*",
-        file_metadata: Dict[str, Any] = None
+        file_metadata: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Load files and return chunks as dicts with metadata.
-        
-        Args:
-            file_path: Path to a single file (PDF or text)
-            directory: Path to directory with files
-            glob_pattern: Pattern for files (default: *.*)
-            file_metadata: Additional metadata to add to all chunks
-            
-        Returns:
-            List of dicts with 'text' and 'metadata' keys
-        """
-        results = self.load_and_chunk(
-            file_path=file_path, 
-            directory=directory, 
-            glob_pattern=glob_pattern
-        )
-        
-        # Add additional metadata if provided
-        if file_metadata:
-            for result in results:
-                result["metadata"].update(file_metadata)
-        
+        results = self.load_and_chunk(file_path=file_path, directory=directory, glob_pattern=glob_pattern)
+        for result in results:
+            result["metadata"].update(file_metadata or {})
         return results
 
 
-# Keep old class name for backward compatibility
+# Old names, kept so existing scripts keep working
 PDFDataLoader = DocumentLoader
 
 
-# Convenience function for quick usage
-def load_documents(
-    source: str,
-    chunk_size: int = 512,
-    chunk_overlap: int = 50,
-    is_directory: bool = False,
-    glob_pattern: str = "*.*"
-) -> List[Dict[str, Any]]:
-    """
-    Quick load function for documents (PDFs, text files, etc.).
-    
-    Usage:
-        # Load single file
-        chunks = load_documents("document.pdf")
-        chunks = load_documents("notes.txt")
-        
-        # Load all files from directory
-        chunks = load_documents("./docs", is_directory=True)
-        
-        # Load only PDFs from directory
-        chunks = load_documents("./docs", is_directory=True, glob_pattern="*.pdf")
-    
-    Args:
-        source: File path or directory path
-        chunk_size: Target chunk size in characters
-        chunk_overlap: Overlap between chunks
-        is_directory: If True, treat source as directory
-        glob_pattern: File pattern to match (when is_directory=True)
-        
-    Returns:
-        List of dicts with 'text' and 'metadata'
-    """
+def load_documents(source: str, chunk_size: int = 512, chunk_overlap: int = 50, is_directory: bool = False, glob_pattern: str = "*.*") -> List[Dict[str, Any]]:
+    """Quick helper: load_documents("policy.pdf") or load_documents("./docs", is_directory=True)."""
     loader = DocumentLoader(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    
     if is_directory:
-        chunks = loader.load_and_chunk_with_metadata(directory=source, glob_pattern=glob_pattern)
-    else:
-        chunks = loader.load_and_chunk_with_metadata(file_path=source)
-    
-    return chunks
+        return loader.load_and_chunk_with_metadata(directory=source, glob_pattern=glob_pattern)
+    return loader.load_and_chunk_with_metadata(file_path=source)
 
 
-# Keep old function name for backward compatibility
 load_pdfs = load_documents
 
 
 if __name__ == "__main__":
-    # Example usage
     import sys
-    
+
     if len(sys.argv) > 1:
-        source = sys.argv[1]
-        is_dir = len(sys.argv) > 2 and sys.argv[2] == "--dir"
-        
-        chunks = load_pdfs(source, is_directory=is_dir)
+        chunks = load_documents(sys.argv[1], is_directory=len(sys.argv) > 2 and sys.argv[2] == "--dir")
         print(f"Loaded {len(chunks)} chunks")
-        
         for i, chunk in enumerate(chunks[:3]):
-            print(f"\n--- Chunk {i} ---")
-            print(chunk["text"][:200] + "..." if len(chunk["text"]) > 200 else chunk["text"])
+            print(f"\n--- Chunk {i} ({chunk['metadata']['kind']}, {len(chunk['text'])} chars) ---\n{chunk['text'][:300]}")
     else:
         print("Usage: python data_loader.py <file_or_directory> [--dir]")

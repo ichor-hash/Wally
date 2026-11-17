@@ -8,8 +8,6 @@ import uuid
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Literal
 
-import inngest
-import inngest.fast_api
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,46 +17,88 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-# Import RAG components
-from vector_db import RAGVectorDB
-from llm import get_llm_provider
+from costs import AnswerCache, Pricing
 from data_loader import DocumentLoader
+from llm import llm_from_env
+from pipeline import Retriever, RERANK_CANDIDATE_MULTIPLIER, trim_to_budget
 from reranker import Reranker
 from telemetry import Telemetry, RateLimiter
+from vector_db import RAGVectorDB, RETRIEVAL_MODES
+
+log = logging.getLogger("uvicorn")
+ROOT = Path(__file__).parent
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
 
 # ============================================================
 # CONFIG
 # ============================================================
-COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "docs")
+COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "ethan_docs")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_PATH = os.getenv("QDRANT_PATH", "").strip()  # set to run Qdrant embedded, with no server
+EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid")
 RATE_LIMIT = int(os.getenv("RATE_LIMIT", "30"))  # queries per minute per client
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
+CHUNK_STRATEGY = os.getenv("CHUNK_STRATEGY", "structure")
 RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-RERANK_CANDIDATE_MULTIPLIER = 3  # retrieve top_k * N candidates before reranking
 GAP_THRESHOLD = float(os.getenv("GAP_THRESHOLD", "0.25"))
 COMPANY_NAME = os.getenv("COMPANY_NAME", "your company")
-ASSISTANT_NAME = os.getenv("ASSISTANT_NAME", "Wally")
+ASSISTANT_NAME = os.getenv("ASSISTANT_NAME", "Ethan")
 COMPANY_PROFILE = os.getenv("COMPANY_PROFILE", "").strip()
+# Cost controls (docs/COSTS.md)
+MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "8000"))
+MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "1024"))
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
+ANSWER_CACHE_TTL = float(os.getenv("ANSWER_CACHE_TTL", "3600"))
+ANSWER_CACHE_SIZE = int(os.getenv("ANSWER_CACHE_SIZE", "256"))
+# Deployment (docs/HOSTING.md)
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+ALLOW_DIRECTORY_INGEST = env_bool("ALLOW_DIRECTORY_INGEST")
+INNGEST_ENABLED = env_bool("INNGEST_ENABLED")
+
 SUPPORTED_EXTENSIONS = [".pdf", ".txt", ".md"]
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
-app = FastAPI(title=f"{ASSISTANT_NAME} - Company Knowledge Assistant")
+app = FastAPI(title=f"{ASSISTANT_NAME} - Company Knowledge Assistant", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Next.js dev server
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"],
 )
 
-rag_db = RAGVectorDB(url=QDRANT_URL, collection=COLLECTION_NAME)
-llm = get_llm_provider("groq")
+rag_db = RAGVectorDB(
+    url=QDRANT_URL, path=QDRANT_PATH or None, api_key=os.getenv("QDRANT_API_KEY"),
+    collection=COLLECTION_NAME, embed_model=EMBED_MODEL,
+)
 reranker = Reranker(RERANK_MODEL)
+retriever = Retriever(rag_db, reranker, default_mode=RETRIEVAL_MODE)
 telemetry = Telemetry(gap_threshold=GAP_THRESHOLD)
 rate_limiter = RateLimiter(RATE_LIMIT)
+pricing = Pricing()
+answer_cache = AnswerCache(max_entries=ANSWER_CACHE_SIZE, ttl_seconds=ANSWER_CACHE_TTL)
+
+# The API still starts without an LLM key, so the library and health check work
+# and the UI can say what is missing instead of showing "API offline".
+try:
+    llm = llm_from_env()
+    llm_error = None
+except Exception as e:  # missing key, missing package
+    llm, llm_error = None, str(e)
+    log.warning("LLM unavailable: %s", e)
+
+try:
+    VISUALS_PROMPT = (ROOT / "prompts" / "openui.txt").read_text(encoding="utf-8").strip()
+except FileNotFoundError:
+    VISUALS_PROMPT = ""
 
 
 # ============================================================
@@ -73,6 +113,8 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(5, ge=1, le=20)
     rerank: bool = False
+    mode: Optional[Literal["hybrid", "dense", "keyword"]] = None  # default: RETRIEVAL_MODE
+    visuals: bool = False  # let the model add an OpenUI chart or table to the answer
     history: List[ChatTurn] = Field(default_factory=list)
 
 
@@ -87,6 +129,10 @@ class FeedbackRequest(BaseModel):
 # HELPERS
 # ============================================================
 def client_key(request: Request) -> str:
+    # Behind a reverse proxy the socket address is the proxy; trust the first forwarded hop
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "anonymous"
 
 
@@ -117,48 +163,34 @@ def validate_query(req: SearchRequest):
         raise HTTPException(status_code=400, detail="query is required")
     if len(req.query) > 2000:
         raise HTTPException(status_code=400, detail="Query too long. Max 2000 characters.")
+    if llm is None:
+        raise HTTPException(status_code=503, detail=f"No language model configured: {llm_error}")
 
 
-def retrieve(query: str, top_k: int, use_rerank: bool) -> Dict[str, Any]:
-    """Embed, search and optionally rerank. Returns results plus per-stage timings."""
-    t0 = time.perf_counter()
-    vector = rag_db.embed_query(query)
-    embedding_time = time.perf_counter() - t0
-
-    candidates = top_k * RERANK_CANDIDATE_MULTIPLIER if use_rerank else top_k
-    t1 = time.perf_counter()
-    results = rag_db.search_by_vector(vector, top_k=candidates)
-    search_time = time.perf_counter() - t1
-    candidate_count = len(results)
-
-    rerank_time = 0.0
-    if use_rerank and results:
-        t2 = time.perf_counter()
-        results = reranker.rerank(query, results, top_k)
-        rerank_time = time.perf_counter() - t2
-
-    return {
-        "results": results,
-        "candidates": candidate_count,
-        "embedding_time": embedding_time,
-        "search_time": search_time,
-        "rerank_time": rerank_time,
-    }
+def retrieve(query: str, top_k: int, use_rerank: bool, mode: Optional[str] = None) -> Dict[str, Any]:
+    """Embed, search and optionally rerank, then keep what fits the context budget."""
+    timings = retriever.retrieve(query, top_k=top_k, rerank=use_rerank, mode=mode)
+    timings["results"] = trim_to_budget(timings["results"], MAX_CONTEXT_CHARS)
+    return timings
 
 
 def format_sources(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     sources = []
     for i, r in enumerate(results, 1):
         payload = r["payload"] or {}
+        keyword = r.get("keyword_score")
         sources.append({
             "ref": i,
             "id": str(r["id"]),
             "score": round(r["score"], 4),
             "vector_score": round(r.get("vector_score", r["score"]), 4),
+            "keyword_score": round(keyword, 3) if keyword is not None else None,
             "rerank_score": round(r["rerank_score"], 4) if "rerank_score" in r else None,
+            "matched_by": r.get("matched_by", "dense"),
             "text": payload.get("text", ""),
             "source_file": payload.get("source_file", "Unknown"),
             "chunk_index": payload.get("chunk_index", 0),
+            "section": payload.get("section", ""),
             "metadata": {k: v for k, v in payload.items() if k != "text"},
         })
     return sources
@@ -168,13 +200,14 @@ def confidence_for(sources: List[Dict[str, Any]], reranked: bool) -> Dict[str, A
     """Grounding confidence from retrieval scores, so users know when to double-check."""
     if not sources:
         return {"level": "none", "score": 0.0}
-    top = sources[0]["score"]
+    # Hybrid results are ordered by fused rank, so the strongest evidence is not always first
+    top = max(s["rerank_score"] if reranked and s["rerank_score"] is not None else s["vector_score"] for s in sources)
     high, medium = (0.7, 0.3) if reranked else (0.5, GAP_THRESHOLD)
     level = "high" if top >= high else "medium" if top >= medium else "low"
     return {"level": level, "score": round(top, 4)}
 
 
-def build_messages(query: str, sources: List[Dict[str, Any]], history: List[ChatTurn]) -> List[dict]:
+def build_messages(query: str, sources: List[Dict[str, Any]], history: List[ChatTurn], visuals: bool = False) -> List[dict]:
     context = "\n\n".join(
         f"[{s['ref']}] (source: {s['source_file']}, chunk {s['chunk_index']})\n{s['text']}" for s in sources
     )
@@ -184,12 +217,15 @@ def build_messages(query: str, sources: List[Dict[str, Any]], history: List[Chat
         "Cite every factual claim with its chunk number in square brackets, e.g. [1] or [2][3]. "
         "If the context does not contain the answer, say so plainly and suggest what document "
         "or team might have it - never invent policies, numbers or names. "
+        "When a chunk contains a table, read every row before comparing values. "
         "Be concise and use short paragraphs or bullet lists where it helps readability."
     )
     if COMPANY_PROFILE:
         # Background only: lets the assistant interpret terms like "this fiscal year",
         # but facts in answers must still come from the cited chunks.
         system += f"\n\nBackground on {COMPANY_NAME} (for interpreting questions, not a citable source): {COMPANY_PROFILE}"
+    if visuals and VISUALS_PROMPT:
+        system += "\n\n" + VISUALS_PROMPT
     messages = [{"role": "system", "content": system}]
     # Keep a short window of prior turns so follow-up questions make sense
     for turn in history[-6:]:
@@ -200,6 +236,8 @@ def build_messages(query: str, sources: List[Dict[str, Any]], history: List[Chat
 
 def build_metrics(timings: Dict[str, Any], llm_time: float, total_time: float,
                   usage: Dict[str, int], ttft: Optional[float] = None) -> Dict[str, Any]:
+    prompt_tokens = usage.get("prompt_tokens", 0)
+    completion_tokens = usage.get("completion_tokens", 0)
     return {
         "total_time": round(total_time, 3),
         "embedding_time": round(timings["embedding_time"], 3),
@@ -208,12 +246,48 @@ def build_metrics(timings: Dict[str, Any], llm_time: float, total_time: float,
         "rerank_time": round(timings["rerank_time"], 3),
         "llm_time": round(llm_time, 3),
         "ttft": round(ttft, 3) if ttft is not None else None,
-        "prompt_tokens": usage.get("prompt_tokens", 0),
-        "completion_tokens": usage.get("completion_tokens", 0),
-        "total_tokens": usage.get("total_tokens", 0),
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": usage.get("total_tokens", 0) or prompt_tokens + completion_tokens,
+        "cost_usd": round(pricing.cost(prompt_tokens, completion_tokens), 6),
         "candidates": timings["candidates"],
+        "mode": timings["mode"],
+        "cached": False,
+        "tokens_saved": 0,
     }
 
+
+def cache_key_for(req: SearchRequest) -> str:
+    return AnswerCache.key(
+        q=" ".join(req.query.lower().split()), k=req.top_k, rerank=req.rerank, mode=req.mode or RETRIEVAL_MODE,
+        visuals=req.visuals, history=[(t.role, t.content) for t in req.history[-6:]],
+        index=rag_db.version, model=llm.model if llm else None,
+    )
+
+
+def cached_metrics(entry: Dict[str, Any], total_time: float) -> Dict[str, Any]:
+    """Metrics for an answer served from the cache: no model time, no tokens, no cost."""
+    return {
+        "total_time": round(total_time, 3), "embedding_time": 0.0, "search_time": 0.0, "retrieval_time": 0.0,
+        "rerank_time": 0.0, "llm_time": 0.0, "ttft": round(total_time, 3),
+        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,
+        "candidates": 0, "mode": entry["mode"], "cached": True,
+        "tokens_saved": entry["tokens"], "cost_saved_usd": entry["cost_usd"],
+    }
+
+
+def remember(key: str, answer: str, sources: List[Dict[str, Any]], confidence: Dict[str, Any], metrics: Dict[str, Any]):
+    if answer.strip() and answer != EMPTY_ANSWER and sources:
+        answer_cache.put(key, {
+            "answer": answer, "sources": sources, "confidence": confidence, "mode": metrics["mode"],
+            "tokens": metrics["total_tokens"], "cost_usd": metrics["cost_usd"],
+        })
+
+
+EMPTY_ANSWER = (
+    "The model used its whole output budget before writing an answer. "
+    "Ask again, or raise MAX_OUTPUT_TOKENS on the server."
+)
 
 NO_RESULTS_ANSWER = (
     "I couldn't find anything relevant in the knowledge base. "
@@ -232,10 +306,9 @@ async def root():
 @app.get("/health")
 def health():
     db_ok = True
-    total_docs = total_chunks = 0
+    stats = {"documents": 0, "chunks": 0}
     try:
-        total_chunks = rag_db.client.count(collection_name=COLLECTION_NAME, exact=True).count
-        total_docs = len({p.payload.get("source_file", "Unknown") for p in rag_db.scroll_all()})
+        stats = rag_db.stats()
     except Exception:
         db_ok = False
 
@@ -244,20 +317,29 @@ def health():
         "database_status": "connected" if db_ok else "disconnected",
         "assistant_name": ASSISTANT_NAME,
         "company_name": COMPANY_NAME,
-        "total_documents": total_docs,
-        "total_chunks": total_chunks,
+        "total_documents": stats["documents"],
+        "total_chunks": stats["chunks"],
         "embedding_model": rag_db.embed_model,
         "embedding_provider": rag_db.embed_provider,
-        "llm_model": llm.model,
-        "llm_provider": llm.provider_name,
+        "llm_model": llm.model if llm else None,
+        "llm_provider": llm.provider_name if llm else None,
+        "llm_error": llm_error,
         "reranker_model": RERANK_MODEL,
         "reranker_loaded": reranker.loaded,
+        "retrieval_mode": retriever.default_mode if rag_db.hybrid_available else "dense",
+        "hybrid_available": rag_db.hybrid_available,
+        "visuals_available": bool(VISUALS_PROMPT),
         "collection": rag_db.collection,
         "dimension": rag_db.dimension,
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
-        "similarity_metric": "Cosine Similarity",
-        "qdrant_url": QDRANT_URL,
+        "chunk_strategy": CHUNK_STRATEGY,
+        "similarity_metric": "Cosine similarity + BM25, fused by reciprocal rank" if rag_db.hybrid_available else "Cosine similarity",
+        "qdrant_url": rag_db.location,
+        "pricing": pricing.as_dict(),
+        "answer_cache": answer_cache.stats(),
+        "max_context_chars": MAX_CONTEXT_CHARS,
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
         "timestamp": time.time(),
     }
 
@@ -265,12 +347,21 @@ def health():
 @app.get("/rate-limit")
 async def get_rate_limit(request: Request):
     """Current client's quota plus the latest upstream LLM quota reported by the provider."""
-    return {**rate_limiter.status(client_key(request)), "upstream": llm.upstream_limits}
+    return {**rate_limiter.status(client_key(request)), "upstream": llm.upstream_limits if llm else {}}
 
 
 @app.get("/metrics")
 async def get_metrics():
-    return telemetry.summary()
+    return {**telemetry.summary(), "pricing": pricing.as_dict(), "answer_cache": answer_cache.stats()}
+
+
+@app.get("/evals")
+def get_evals():
+    """Latest retrieval evaluation report (written by `python evals/run_evals.py`)."""
+    path = ROOT / "evals" / "results" / "latest.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No evaluation has been run yet. Run: python evals/run_evals.py")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @app.get("/insights")
@@ -312,7 +403,7 @@ def warmup_reranker():
 # ============================================================
 def ingest_file_path(file_path: str, display_name: str, metadata: Optional[dict] = None) -> Dict[str, Any]:
     """Chunk and embed a file, replacing any previous version with the same name."""
-    loader = DocumentLoader(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+    loader = DocumentLoader(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP, strategy=CHUNK_STRATEGY)
     chunks = loader.load_and_chunk_with_metadata(file_path=file_path, file_metadata=metadata or {})
     if not chunks:
         raise HTTPException(status_code=400, detail="No text content found in file")
@@ -334,6 +425,7 @@ def ingest_file_path(file_path: str, display_name: str, metadata: Optional[dict]
         "status": "ok",
         "file": display_name,
         "chunks": len(ids),
+        "tables": sum(1 for c in chunks if c["metadata"].get("kind") == "table"),
         "replaced_chunks": replaced,
         "embedding_time": round(time.perf_counter() - t0, 3),
         "ids": ids[:10],
@@ -384,7 +476,7 @@ async def ingest_pdf(file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_file:
             temp_file.write(content)
             temp_path = temp_file.name
-        result = await run_in_threadpool(ingest_file_path, temp_path, file.filename)
+        result = await run_in_threadpool(ingest_file_path, temp_path, Path(file.filename).name)
         result["size_bytes"] = len(content)
         return result
     except HTTPException:
@@ -392,7 +484,7 @@ async def ingest_pdf(file: UploadFile = File(...)):
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="Text file is not valid UTF-8")
     except Exception as e:
-        logging.getLogger("uvicorn").exception("Error ingesting file")
+        log.exception("Error ingesting file")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -405,12 +497,13 @@ async def ingest_pdf(file: UploadFile = File(...)):
 @app.post("/ingest/directory")
 def ingest_directory(directory: str, glob_pattern: str = "*.*"):
     """
-    Ingest all supported files from a directory.
+    Ingest all supported files from a server-side directory.
 
-    Query params:
-        directory: Path to directory containing files
-        glob_pattern: Glob pattern to match files (default: *.* for all)
+    Off by default: it lets any caller read files from the server's disk.
+    Enable with ALLOW_DIRECTORY_INGEST=true on a trusted network only.
     """
+    if not ALLOW_DIRECTORY_INGEST:
+        raise HTTPException(status_code=403, detail="Directory ingestion is disabled. Set ALLOW_DIRECTORY_INGEST=true to enable it.")
     dir_path = Path(directory)
     if not dir_path.exists():
         raise HTTPException(status_code=400, detail=f"Directory not found: {directory}")
@@ -436,28 +529,39 @@ def ingest_directory(directory: str, glob_pattern: str = "*.*"):
 # ============================================================
 # DOCUMENTS
 # ============================================================
+_documents_cache: Dict[str, Any] = {"version": -1, "docs": {}}
+
+
+def _document_index() -> Dict[str, Dict[str, Any]]:
+    """Per-document totals. One full scan per index change instead of one per request."""
+    if _documents_cache["version"] != rag_db.version:
+        version = rag_db.version
+        docs: Dict[str, Dict[str, Any]] = {}
+        for point in rag_db.scroll_all(with_payload=["source_file", "file_type", "uploaded_at", "char_count", "kind"]):
+            payload = point.payload or {}
+            name = payload.get("source_file", "Unknown")
+            doc = docs.setdefault(name, {
+                "name": name, "status": "Indexed", "size": 0, "chunks": 0, "tables": 0,
+                "file_type": payload.get("file_type", Path(name).suffix),
+                "uploaded_at": payload.get("uploaded_at"), "ids": [],
+            })
+            doc["chunks"] += 1
+            doc["size"] += payload.get("char_count", 0)
+            doc["tables"] += payload.get("kind") == "table"
+            doc["ids"].append(str(point.id))
+        _documents_cache.update(version=version, docs=docs)
+    return _documents_cache["docs"]
+
+
 @app.get("/documents")
 def list_documents():
     """List all stored documents with chunk counts and sizes."""
     try:
-        docs_map: Dict[str, Dict[str, Any]] = {}
-        for point in rag_db.scroll_all():
-            payload = point.payload or {}
-            name = payload.get("source_file", "Unknown")
-            doc = docs_map.setdefault(name, {
-                "name": name,
-                "status": "Indexed",
-                "size": 0,
-                "chunks": 0,
-                "file_type": payload.get("file_type", Path(name).suffix),
-                "uploaded_at": payload.get("uploaded_at"),
-                "times_cited": 0,
-            })
-            doc["chunks"] += 1
-            doc["size"] += len(payload.get("text", ""))
-            doc["times_cited"] += telemetry.chunk_usage.get(str(point.id), 0)
-
-        documents = sorted(docs_map.values(), key=lambda d: d["uploaded_at"] or 0, reverse=True)
+        documents = [
+            {**{k: v for k, v in doc.items() if k != "ids"}, "times_cited": sum(telemetry.chunk_usage.get(i, 0) for i in doc["ids"])}
+            for doc in _document_index().values()
+        ]
+        documents.sort(key=lambda d: d["uploaded_at"] or 0, reverse=True)
         return {"documents": documents, "total": len(documents)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching documents: {str(e)}")
@@ -477,11 +581,8 @@ def delete_document(doc_name: str):
 @app.get("/documents/{doc_name}/chunks")
 def get_document_chunks(doc_name: str):
     """Get all chunks for a document with usage counts and size statistics."""
-    from qdrant_client.models import Filter, FieldCondition, MatchValue
-
     try:
-        source_filter = Filter(must=[FieldCondition(key="source_file", match=MatchValue(value=doc_name))])
-        points = list(rag_db.scroll_all(scroll_filter=source_filter))
+        points = list(rag_db.scroll_all(scroll_filter=rag_db.source_filter(doc_name)))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching chunks: {str(e)}")
 
@@ -494,6 +595,8 @@ def get_document_chunks(doc_name: str):
             "id": cid,
             "text": payload.get("text", ""),
             "chunk_index": payload.get("chunk_index", 0),
+            "section": payload.get("section", ""),
+            "kind": payload.get("kind", "text"),
             "char_count": len(payload.get("text", "")),
             "used_count": usage[cid]["count"],
             "last_used": usage[cid]["last_used"],
@@ -527,36 +630,47 @@ def search(req: SearchRequest, request: Request):
     """
     Retrieve relevant chunks and generate a cited answer (non-streaming).
 
-    Returns answer, sources, confidence and a latency/token breakdown.
+    Returns answer, sources, confidence and a latency/token/cost breakdown.
     """
     client = enforce_rate_limit(request)
     validate_query(req)
     start = time.perf_counter()
     query_id = uuid.uuid4().hex
+    key = cache_key_for(req)
 
-    try:
-        timings = retrieve(req.query, req.top_k, req.rerank)
-        sources = format_sources(timings["results"])
+    cached = answer_cache.get(key)
+    if cached:
+        answer, sources, confidence = cached["answer"], cached["sources"], cached["confidence"]
+        metrics = cached_metrics(cached, time.perf_counter() - start)
+    else:
+        try:
+            timings = retrieve(req.query, req.top_k, req.rerank, req.mode)
+            sources = format_sources(timings["results"])
+            if not sources:
+                answer, usage, llm_time = NO_RESULTS_ANSWER, {}, 0.0
+            else:
+                t0 = time.perf_counter()
+                answer, usage = llm.chat_with_usage(
+                    build_messages(req.query, sources, req.history, req.visuals),
+                    temperature=LLM_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS,
+                )
+                llm_time = time.perf_counter() - t0
+                if not answer.strip():
+                    answer = EMPTY_ANSWER
+        except Exception as e:
+            log.exception("Search error")
+            raise HTTPException(status_code=500, detail=f"Error during search: {str(e)}")
+        confidence = confidence_for(sources, req.rerank)
+        metrics = build_metrics(timings, llm_time, time.perf_counter() - start, usage)
+        remember(key, answer, sources, confidence, metrics)
 
-        if not sources:
-            answer, usage, llm_time = NO_RESULTS_ANSWER, {}, 0.0
-        else:
-            t0 = time.perf_counter()
-            answer, usage = llm.chat_with_usage(build_messages(req.query, sources, req.history))
-            llm_time = time.perf_counter() - t0
-    except Exception as e:
-        logging.getLogger("uvicorn").exception("Search error")
-        raise HTTPException(status_code=500, detail=f"Error during search: {str(e)}")
-
-    metrics = build_metrics(timings, llm_time, time.perf_counter() - start, usage)
     telemetry.record_query(query_id, req.query, metrics, sources)
-
     return JSONResponse(
         {
             "query_id": query_id,
             "answer": answer,
             "sources": sources,
-            "confidence": confidence_for(sources, req.rerank),
+            "confidence": confidence,
             "reranked": req.rerank,
             "metrics": metrics,
         },
@@ -578,6 +692,7 @@ def search_stream(req: SearchRequest, request: Request):
     client = enforce_rate_limit(request)
     validate_query(req)
     query_id = uuid.uuid4().hex
+    key = cache_key_for(req)
 
     # A sync generator: Starlette iterates it in a threadpool, so blocking
     # model calls don't stall the event loop.
@@ -585,41 +700,60 @@ def search_stream(req: SearchRequest, request: Request):
         start = time.perf_counter()
         try:
             yield sse("stage", {"stage": "retrieving", "query_id": query_id})
-            timings = retrieve(req.query, req.top_k, req.rerank)
+
+            cached = answer_cache.get(key)
+            if cached:
+                sources = cached["sources"]
+                yield sse("stage", {"stage": "retrieved", "embedding_time": 0, "search_time": 0, "rerank_time": 0,
+                                    "results_found": len(sources), "cached": True})
+                yield sse("sources", {"sources": sources, "confidence": cached["confidence"], "reranked": req.rerank})
+                yield sse("token", {"token": cached["answer"]})
+                metrics = cached_metrics(cached, time.perf_counter() - start)
+                telemetry.record_query(query_id, req.query, metrics, sources)
+                yield sse("complete", {"query_id": query_id, "metrics": metrics, "rate_limit": rate_limiter.status(client)})
+                return
+
+            timings = retrieve(req.query, req.top_k, req.rerank, req.mode)
             sources = format_sources(timings["results"])
+            confidence = confidence_for(sources, req.rerank)
             yield sse("stage", {
                 "stage": "retrieved",
+                "mode": timings["mode"],
                 "embedding_time": round(timings["embedding_time"], 3),
                 "search_time": round(timings["search_time"], 3),
                 "rerank_time": round(timings["rerank_time"], 3),
                 "results_found": len(sources),
             })
-            yield sse("sources", {
-                "sources": sources,
-                "confidence": confidence_for(sources, req.rerank),
-                "reranked": req.rerank,
-            })
+            yield sse("sources", {"sources": sources, "confidence": confidence, "reranked": req.rerank})
 
-            usage, llm_time, ttft = {}, 0.0, None
+            usage, llm_time, ttft, parts = {}, 0.0, None, []
             if not sources:
                 yield sse("token", {"token": NO_RESULTS_ANSWER})
             else:
                 yield sse("stage", {"stage": "generating"})
                 t0 = time.perf_counter()
-                for kind, value in llm.stream_chat(build_messages(req.query, sources, req.history)):
+                stream = llm.stream_chat(
+                    build_messages(req.query, sources, req.history, req.visuals),
+                    temperature=LLM_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS,
+                )
+                for kind, value in stream:
                     if kind == "token":
                         if ttft is None:
                             ttft = time.perf_counter() - start
+                        parts.append(value)
                         yield sse("token", {"token": value})
                     elif kind == "usage":
                         usage = value
                 llm_time = time.perf_counter() - t0
+                if not "".join(parts).strip():
+                    yield sse("token", {"token": EMPTY_ANSWER})
 
             metrics = build_metrics(timings, llm_time, time.perf_counter() - start, usage, ttft)
+            remember(key, "".join(parts), sources, confidence, metrics)
             telemetry.record_query(query_id, req.query, metrics, sources)
             yield sse("complete", {"query_id": query_id, "metrics": metrics, "rate_limit": rate_limiter.status(client)})
         except Exception as e:
-            logging.getLogger("uvicorn").exception("Streaming search error")
+            log.exception("Streaming search error")
             yield sse("error", {"error": str(e)})
 
     return StreamingResponse(
@@ -630,118 +764,60 @@ def search_stream(req: SearchRequest, request: Request):
 
 
 # ============================================================
-# INNGEST FUNCTIONS
+# INNGEST (optional, INNGEST_ENABLED=true)
 # ============================================================
-# Inngest handles event-driven workflows. Functions are triggered
-# by events sent to the Inngest platform.
+# Event-driven ingestion and search for background jobs. Off by default so the
+# API exposes no extra endpoint and needs no extra dependency.
 #
-# EVENTS YOU CAN TRIGGER:
-# ------------------------
-# 1. rag/ingest_file  - Trigger file ingestion from a file path
-#    Payload: {"file_path": "/path/to/file.pdf"}
+#   rag/ingest_file   {"file_path": "/path/to/file.pdf", "metadata": {}}
+#   rag/ingest_texts  {"texts": ["text1", "text2"], "metadata": [{}]}
+#   rag/search        {"query": "your question", "top_k": 5, "rerank": false}
 #
-# 2. rag/ingest_texts - Trigger text ingestion
-#    Payload: {"texts": ["text1", "text2"], "metadata": [{}]}
-#
-# 3. rag/search       - Trigger RAG search
-#    Payload: {"query": "your question", "top_k": 5}
-#
-# HOW TO SEND EVENTS (from your frontend or external system):
-# -----------------------------------------------------------
-# Using curl:
-#   curl -X POST https://your-inngest-url/-/events \
-#     -H "Content-Type: application/json" \
-#     -d '{"name": "rag/ingest_file", "data": {"file_path": "/path/to.pdf"}}'
-#
-# Using Python:
-#   import inngest
-#   client = inngest.Inngest(app_id="rag_app")
-#   client.send_event("rag/ingest_file", {"file_path": "/path/to.pdf"})
-#
-# DEVELOPMENT VS PRODUCTION:
-# --------------------------
-# - is_production=False in Inngest client = dev mode (local/webhook testing)
-# - Set is_production=True when deploying to production
-#
-# ============================================================
+# Install with: pip install -r requirements-optional.txt
+# Set INNGEST_PRODUCTION=true (and the Inngest signing key) outside local development.
+if INNGEST_ENABLED:
+    import inngest
+    import inngest.fast_api
 
-inngest_client = inngest.Inngest(
-    app_id="rag_app",
-    logger=logging.getLogger("uvicorn"),
-    is_production=False,  # Set to True in production
-    serializer=inngest.PydanticSerializer(),
-)
+    inngest_client = inngest.Inngest(
+        app_id="ethan",
+        logger=log,
+        is_production=env_bool("INNGEST_PRODUCTION"),
+        serializer=inngest.PydanticSerializer(),
+    )
 
+    @inngest_client.create_function(fn_id="RAG: Ingest File", trigger=inngest.TriggerEvent(event="rag/ingest_file"))
+    async def rag_ingest_file(ctx: inngest.Context):
+        file_path = ctx.event.data.get("file_path")
+        if not file_path:
+            return {"error": "file_path is required"}
+        return await run_in_threadpool(ingest_file_path, file_path, Path(file_path).name, ctx.event.data.get("metadata", {}))
 
-@inngest_client.create_function(
-    fn_id="RAG: Ingest File",
-    trigger=inngest.TriggerEvent(event="rag/ingest_file"),
-)
-async def rag_ingest_file(ctx: inngest.Context):
-    """
-    Ingest a file (PDF or text) from a file path.
+    @inngest_client.create_function(fn_id="RAG: Ingest Texts", trigger=inngest.TriggerEvent(event="rag/ingest_texts"))
+    async def rag_ingest_texts(ctx: inngest.Context):
+        texts = ctx.event.data.get("texts", [])
+        if not texts:
+            return {"error": "texts array is required"}
+        ids = await run_in_threadpool(rag_db.add_texts, texts, None, ctx.event.data.get("metadata"))
+        return {"status": "ok", "ingested": len(ids), "ids": ids}
 
-    Event: rag/ingest_file
-    Payload: {"file_path": "/path/to/document.pdf", "metadata": {}}
-    """
-    event_data = ctx.event.data
-    file_path = event_data.get("file_path")
-    if not file_path:
-        return {"error": "file_path is required"}
+    @inngest_client.create_function(fn_id="RAG: Search", trigger=inngest.TriggerEvent(event="rag/search"))
+    async def rag_search(ctx: inngest.Context):
+        data = ctx.event.data
+        query = data.get("query")
+        if not query:
+            return {"error": "query is required"}
+        if llm is None:
+            return {"error": f"No language model configured: {llm_error}"}
 
-    return await run_in_threadpool(ingest_file_path, file_path, Path(file_path).name, event_data.get("metadata", {}))
+        def run():
+            timings = retrieve(query, data.get("top_k", 5), data.get("rerank", False), data.get("mode"))
+            sources = format_sources(timings["results"])
+            if not sources:
+                return {"answer": NO_RESULTS_ANSWER, "sources": []}
+            answer, usage = llm.chat_with_usage(build_messages(query, sources, []), temperature=LLM_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS)
+            return {"answer": answer, "usage": usage, "sources": [{"id": s["id"], "score": s["score"]} for s in sources]}
 
+        return await run_in_threadpool(run)
 
-@inngest_client.create_function(
-    fn_id="RAG: Ingest Texts",
-    trigger=inngest.TriggerEvent(event="rag/ingest_texts"),
-)
-async def rag_ingest_texts(ctx: inngest.Context):
-    """
-    Ingest text strings into the vector database.
-
-    Event: rag/ingest_texts
-    Payload: {"texts": ["text1", "text2"], "metadata": [{}]}
-    """
-    event_data = ctx.event.data
-    texts = event_data.get("texts", [])
-    if not texts:
-        return {"error": "texts array is required"}
-
-    ids = await run_in_threadpool(rag_db.add_texts, texts, None, event_data.get("metadata"))
-    return {"status": "ok", "ingested": len(ids), "ids": ids}
-
-
-@inngest_client.create_function(
-    fn_id="RAG: Search",
-    trigger=inngest.TriggerEvent(event="rag/search"),
-)
-async def rag_search(ctx: inngest.Context):
-    """
-    Perform RAG search and return answer.
-
-    Event: rag/search
-    Payload: {"query": "your question", "top_k": 5, "rerank": false}
-    """
-    event_data = ctx.event.data
-    query = event_data.get("query")
-    if not query:
-        return {"error": "query is required"}
-
-    def run():
-        timings = retrieve(query, event_data.get("top_k", 5), event_data.get("rerank", False))
-        sources = format_sources(timings["results"])
-        if not sources:
-            return {"answer": NO_RESULTS_ANSWER, "sources": []}
-        answer, usage = llm.chat_with_usage(build_messages(query, sources, []))
-        return {"answer": answer, "usage": usage, "sources": [{"id": s["id"], "score": s["score"]} for s in sources]}
-
-    return await run_in_threadpool(run)
-
-
-# Serve the FastAPI app with Inngest
-inngest.fast_api.serve(app, inngest_client, [
-    rag_ingest_file,
-    rag_ingest_texts,
-    rag_search
-])
+    inngest.fast_api.serve(app, inngest_client, [rag_ingest_file, rag_ingest_texts, rag_search])

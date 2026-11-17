@@ -1,24 +1,24 @@
-# Core Framework
+# Ethan API. Optional extras: requirements-optional.txt. Tests: requirements-dev.txt.
+#
+# sentence-transformers pulls in PyTorch. On a machine without an NVIDIA GPU, install the
+# CPU build first; it is about a tenth of the size of the default CUDA build:
+#   pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+
+# API
 fastapi==0.162.0
 uvicorn[standard]==0.54.0
 pydantic==2.14.1
 python-dotenv==1.2.4
-streamlit==1.66.1  # legacy UI (app.py); the main UI is wally-frontend/
 
-# Vector Database
+# Vector database (server, Qdrant Cloud, or embedded with QDRANT_PATH)
 qdrant-client==1.20.0
 
-# Embeddings + reranking (cross-encoder)
+# Embeddings + cross-encoder reranking, both local
 sentence-transformers==6.2.0
 
-# LLM
+# LLM: Groq client; OpenRouter and OpenAI-compatible servers (Ollama, vLLM) use requests
 groq==1.7.0
-
-# PDF Processing
-pypdf==6.21.2
-
-# Task Scheduling (optional, for event-driven features)
-inngest==0.5.19
-
-# HTTP
 requests==2.34.2
+
+# Document parsing
+pypdf==6.21.2

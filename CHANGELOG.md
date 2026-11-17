@@ -1,6 +1,47 @@
 # Changelog
 
-## v2.2.0 — Wally the mascot
+## v3.0.0: Ethan
+
+Wally is now **Ethan**. This release changes retrieval, measures it, and makes the result cheaper to run and easier to host.
+
+### Retrieval
+- **Hybrid search.** Each chunk stores a BM25 sparse vector next to its dense vector. Queries run both searches in one Qdrant round trip and merge them with reciprocal rank fusion. Search mode (hybrid, meaning, keywords) is selectable per question.
+- **Reranking on by default.** The cross-encoder's relevance score now drives the grounding label. The reranker loads in the background when the app opens.
+- **Structure-aware chunking.** Tables stay whole with their caption and section heading, headings travel with their text, list labels stay with their list, small fragments are merged, and the fixed window no longer cuts words. `CHUNK_STRATEGY=fixed` keeps the old behaviour.
+- Sources report how they were found (meaning, keywords or both), their section, and match and relevance scores.
+
+### Evaluation
+- A golden set of 36 questions: semantic, exact-term, table and unanswerable.
+- `evals/run_evals.py` compares five retrieval configurations and optionally grades generated answers. It writes `evals/results/REPORT.md` with every pass and failure.
+- Results: retrieval **29 → 35 of 36**, right chunk first **53% → 91%**, unanswerable questions caught **1 → 4 of 4**. Generated answers **24 → 27 of 27**.
+- A new **Evaluation** view in the app.
+- GitHub Actions CI: unit tests, the retrieval evaluation as a quality gate, and frontend lint, typecheck and build. The answer evaluation can be run on demand.
+
+### Charts and tables (OpenUI)
+- Answers that compare numbers can include a bar, line, area or pie chart, or a table, written by the model in OpenUI Lang and rendered with `@openuidev/react-lang`. Off by default; toggle in Settings.
+- The component set is display-only. The model's instructions are generated from the same library the browser renders (`npm run gen:prompt`), and CI checks they are in sync.
+- The Performance and Evaluation views draw their charts through the same renderer.
+
+### Cost
+- Per-answer tokens and cost, from configurable prices. Lifetime totals and the query log persist across restarts.
+- An answer cache keyed on the question, settings, history and index version, so any library change invalidates it.
+- Context and output budgets, temperature 0.2, and `reasoning_effort=low` for `gpt-oss` models. Completion tokens fell 65% with no loss of accuracy, and empty answers caused by the reasoning budget are gone.
+- An `openai_compatible` LLM provider for Ollama, LM Studio, vLLM and llama.cpp: free, private answers.
+- Faster `/health` and `/documents`: cached aggregates instead of a full scan on every poll.
+
+### Hosting
+- Qdrant can run embedded (`QDRANT_PATH`), so local use needs no Docker.
+- A CPU-only API Dockerfile with the models baked in, a web Dockerfile, and `docker-compose.yml`.
+- `docs/HOSTING.md` covers five deployment options and a security checklist. `docs/COSTS.md` covers token economics.
+- `CORS_ORIGINS` is configurable, and the client IP is taken from `X-Forwarded-For` behind a proxy.
+- `/ingest/directory` is now off unless `ALLOW_DIRECTORY_INGEST=true`. Inngest is off unless `INNGEST_ENABLED=true`, and is no longer a required dependency.
+- `scripts/migrate_collection.py` upgrades a v2 collection without re-uploading. Old collections keep working dense-only.
+
+### Renamed
+- `wally-frontend/` → `ethan-frontend/`, `wally_data/` → `ethan_data/`, `WALLY_DATA_DIR` → `ETHAN_DATA_DIR`, mascot shortcut **Shift + E**, default collection `ethan_docs`.
+
+
+## v2.2.0 — Ethan the mascot
 
 ### Added
 - Pixel-art mascot built from the Stormhead sprite sheets (idle, run, attack, damaged, death), merged into one atlas and stepped with CSS transforms.

@@ -1,0 +1,10 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+ethan_data/
+ethan-frontend/
+.git/
+*_backup.py
+docs/screenshots/
