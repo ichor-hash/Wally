@@ -161,4 +161,4 @@ git commit -m "Describe the change"
 git push
 ```
 
-Every push runs CI on GitHub (tests, the evaluation gate, frontend checks): see the **Actions** tab. Get the latest version: `git pull`.
+Get the latest version: `git pull`.

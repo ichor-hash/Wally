@@ -124,7 +124,7 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 
 ### Question 6: a chart
 
-**Ask:** `Chart net sales by reportable segment for 2025.`
+**Ask:** `Chart net sales by reportable segment for 2025.` *(Settings → Charts and tables on.)*
 
 **Expect:** a written, cited answer plus a bar chart, drawn with OpenUI from the numbers in the cited chunk.
 
@@ -138,9 +138,17 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 
 **Say:** "Pure vector search is fuzzy with codes like this. Ethan also runs a keyword search and merges the two rankings, which is hybrid retrieval. In the evaluation it found 11 of 11 exact-term questions."
 
+### Question 8: a calculation, with tools
+
+Turn on **Settings → Agent tools**. **Ask:** `What share of total 2025 net sales came from Services?`
+
+**Expect:** about **26.2%**, with **Steps 1** under the answer: `Calculated 109158 / 416161 * 100 = 26.2298`, and *1/1 claims verified*.
+
+**Say:** "The model doesn't do maths in its head. It calls a calculator and shows the call, and then Ethan checks the claim against the source table."
+
 ### Finish (1 minute)
 
-1. **Evaluation** tab: "36 questions with known answers. The first version passed 29; this one passes 35, and catches every question the documents can't answer. CI fails the build if that drops."
+1. **Evaluation** tab: "40 questions with known answers, and 31 graded answers. The first version answered 28 of 31 correctly; this one answers all 31, and its own checker verified 34 of 35 cited claims." *(Click the fastest-segment row to show v2's wrong answer next to v3's.)*
 2. **Performance** tab: "Embedding and search take milliseconds; almost all the time is the language model. Scroll down: tokens and cost per question, and what the cache saved."
 3. Sidebar foot: "Rate limiting per user, plus Groq's own token quota, live. Over the limit, questions queue instead of failing."
 4. **Settings**: "Search mode, reranking, charts and source count are all switchable."
@@ -159,7 +167,10 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 | Retrieval | Vector similarity only | Hybrid: vectors + BM25 keywords, merged by reciprocal rank fusion |
 | Reranking | Optional | On by default; drives the grounding label |
 | Fastest-segment question | "Europe, +10%", wrong | "Japan, +15%", correct |
-| Evaluation | 7 questions, checked by hand | 36 questions, automatic, in CI |
+| Retrieval | | Corrective re-search when evidence is weak |
+| Answers | | Every cited claim verified; rewritten once if a claim fails |
+| Arithmetic | In the model's head | Calculator tool, step shown under the answer |
+| Evaluation | 7 questions, checked by hand | 40 questions, retrieval and answers graded automatically |
 
 **Still open:** one paraphrased question (*"What is the risk if important employees leave?"*) is missed by every setup; the grounding label measures relevance, not correctness; and numbers that span several tables are still read, not computed. Next steps: a stronger embedding model, an answer-verification step, and XBRL data with a calculator tool for financial questions.
 
@@ -169,13 +180,13 @@ COMPANY_PROFILE=Apple Inc. designs, manufactures and markets smartphones, ... fi
 
 Full details: [EVALUATION.md](EVALUATION.md).
 
-| Retrieval setup | Passed (of 36) | Right chunk first | Unanswerable caught |
+| Retrieval setup | Passed (of 40) | Right chunk first | Unanswerable caught |
 |---|---|---|---|
-| First version | 29 | 53% | 1 of 4 |
+| First version | 33 | 50% | 1 of 4 |
 | Hybrid | 31 | 75% | 1 of 4 |
-| **Hybrid + reranker** | **35** | **91%** | **4 of 4** |
+| **Hybrid + context + reranker** | **39** | **83%** | **4 of 4** |
 
-Generated answers, graded automatically: **27 of 27** correct now, 24 of 27 with the first version's retrieval.
+Generated answers, graded automatically on `gpt-oss-120b`: **31 of 31** correct now, 28 of 31 with the first version's pipeline. 34 of 35 cited claims verified by Ethan's own checker.
 
 ---
 
@@ -206,10 +217,10 @@ The embedder encodes question and chunk *separately*: fast but approximate. The 
 Three layers. (1) The prompt allows only the numbered chunks and requires a citation for every claim. (2) A grounding label warns when retrieval was weak. (3) Weak questions are logged as knowledge gaps. The table case shows the remaining risk, and the fix is answer verification (section 5).
 
 **How did you evaluate it?**
-A golden set of 36 questions in four types (paraphrased, exact terms, tables, unanswerable), scored automatically at two levels: does retrieval find the chunk with the answer, and is the generated answer right and cited. It runs in GitHub Actions on every push and fails the build on a regression (section 6).
+A golden set of 40 questions in five types (paraphrased, exact terms, tables, calculations, unanswerable), scored automatically at two levels: does retrieval find the chunk with the answer, and is the generated answer right and cited. Results are committed with every run, failures included (section 6).
 
 **Which model, and why?**
-`gpt-oss-20b`, an open-weight model, served by Groq: free tier and very fast (about 1 second per answer). Each provider sits behind an interface in `llm.py` and `embeddings.py`, so swapping models is a one-line change.
+`gpt-oss-120b`, an open-weight model, served by Groq: free tier and fast. `gpt-oss-20b` is the cheaper, faster option. Each provider sits behind an interface in `llm.py` and `embeddings.py`, so swapping models is a one-line change.
 
 **Does company data leave the machine?**
 Embedding, search and reranking run locally. Only the 5 retrieved chunks and the question are sent to Groq to write the answer. For strict confidentiality, swap in a self-hosted model; the interface already supports that.

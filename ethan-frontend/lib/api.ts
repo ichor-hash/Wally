@@ -26,17 +26,68 @@ export interface QueryMetrics {
   search_time: number;
   retrieval_time: number;
   rerank_time: number;
+  rewrite_time?: number;
   llm_time: number;
+  verify_time?: number;
   ttft: number | null;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  llm_calls?: number;
   cost_usd: number;
   candidates: number;
   mode: RetrievalMode;
+  agent_steps?: number;
   cached: boolean;
   tokens_saved: number;
   cost_saved_usd?: number;
+}
+
+export type Verdict = "SUPPORTED" | "PARTIAL" | "UNSUPPORTED";
+
+export interface ClaimCheck {
+  id: number;
+  text: string;
+  refs: number[];
+  verdict?: Verdict;
+  reason?: string;
+}
+
+/** Each cited claim checked against the chunks it cites (verify.py). */
+export interface Verification {
+  status: "ok" | "error" | "no_claims";
+  error?: string | null;
+  claims: ClaimCheck[];
+  total: number;
+  supported: number;
+  partial: number;
+  unsupported: number;
+  score: number | null;
+}
+
+/** One tool call in agent mode. */
+export interface AgentStep {
+  step: number;
+  name: "calculate" | "search_documents" | string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  result: string;
+  refs: number[];
+  time: number;
+}
+
+/** A weak search that was retried with a rewritten query. */
+export interface Correction {
+  query: string;
+  evidence_before: number;
+  evidence_after?: number;
+  improved: boolean;
+}
+
+export interface Revision {
+  original: string;
+  problems: ClaimCheck[];
+  before: { supported: number; partial: number; unsupported: number; total: number; score: number | null };
 }
 
 export type RetrievalMode = "hybrid" | "dense" | "keyword";
@@ -74,7 +125,13 @@ export interface MetricsSummary {
   avg_embedding_time: number;
   avg_search_time: number;
   avg_rerank_time: number;
+  avg_rewrite_time?: number;
   avg_llm_time: number;
+  avg_verify_time?: number;
+  faithfulness?: number | null;
+  verified_answers?: number;
+  revised_answers?: number;
+  corrected_searches?: number;
   total_tokens: number;
   avg_tokens: number;
   avg_prompt_tokens: number;
@@ -159,6 +216,11 @@ export interface Health {
   answer_cache: AnswerCacheStats;
   max_context_chars: number;
   max_output_tokens: number;
+  contextual_retrieval: "off" | "header" | "llm";
+  verify_answers: boolean;
+  revise_answers: boolean;
+  corrective_retrieval: boolean;
+  agent_available: boolean;
 }
 
 export interface EvalCase {
@@ -187,15 +249,39 @@ export interface EvalRetrievalConfig {
   cases: EvalCase[];
 }
 
+export interface EvalAnswerCase extends EvalCase {
+  answer: string;
+  confidence: string;
+  retrieved_relevant: boolean;
+  verification: { status: string; total: number; supported: number; partial: number; unsupported: number; score: number | null } | null;
+  unsupported_claims: string[];
+  revised: boolean;
+  corrected_query: string | null;
+  tools: string[];
+  prompt_tokens: number;
+  completion_tokens: number;
+  llm_calls: number;
+  seconds: number;
+}
+
 export interface EvalAnswerConfig {
   label: string;
   model: string;
   provider: string;
   passed: number;
   total: number;
+  by_category: Record<string, { passed: number; total: number }>;
+  faithfulness: number | null;
+  claims_checked: number;
+  claims_supported: number;
+  revised: number;
+  corrected: number;
+  tool_calls: number;
   avg_prompt_tokens: number;
   avg_completion_tokens: number;
-  cases: (EvalCase & { answer: string; confidence: string })[];
+  avg_llm_calls: number;
+  avg_seconds: number;
+  cases: EvalAnswerCase[];
 }
 
 export interface EvalReport {
@@ -214,6 +300,9 @@ export interface SearchBody {
   rerank: boolean;
   mode: RetrievalMode;
   visuals: boolean;
+  agent: boolean;
+  verify: boolean;
+  correct: boolean;
   history: ChatTurn[];
 }
 
@@ -285,7 +374,10 @@ export interface StreamHandlers {
   onStage?: (stage: string, data: Record<string, unknown>) => void;
   onSources?: (sources: Source[], confidence: Confidence) => void;
   onToken?: (token: string) => void;
-  onComplete?: (queryId: string, metrics: QueryMetrics, rateLimit?: RateLimit) => void;
+  onTool?: (step: AgentStep) => void;
+  onVerification?: (verification: Verification) => void;
+  onRevision?: (answer: string, revised: Revision) => void;
+  onComplete?: (queryId: string, metrics: QueryMetrics, rateLimit?: RateLimit, extra?: { correction?: Correction | null; revised?: Revision | null }) => void;
 }
 
 /** POSTs to /search/stream and dispatches Server-Sent Events as they arrive. */
@@ -317,8 +409,20 @@ export async function streamSearch(
       case "token":
         handlers.onToken?.(String(data.token));
         break;
+      case "tool":
+        handlers.onTool?.(data as unknown as AgentStep);
+        break;
+      case "verification":
+        handlers.onVerification?.(data as unknown as Verification);
+        break;
+      case "revision":
+        handlers.onRevision?.(String(data.answer), data.revised as Revision);
+        break;
       case "complete":
-        handlers.onComplete?.(String(data.query_id), data.metrics as QueryMetrics, data.rate_limit as RateLimit);
+        handlers.onComplete?.(String(data.query_id), data.metrics as QueryMetrics, data.rate_limit as RateLimit, {
+          correction: data.correction as Correction | null,
+          revised: data.revised as Revision | null,
+        });
         break;
       case "error":
         throw new ApiError(String(data.error), 500);
@@ -353,6 +457,10 @@ export async function search(body: SearchBody) {
     sources: Source[];
     confidence: Confidence;
     metrics: QueryMetrics;
+    verification: Verification | null;
+    steps: AgentStep[];
+    correction: Correction | null;
+    revised: Revision | null;
   }>("/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

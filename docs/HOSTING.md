@@ -130,3 +130,12 @@ python scripts/migrate_collection.py --source docs --target ethan_docs
 ```
 
 If you point v3 at an old collection without migrating, it keeps working dense-only and says so in Settings.
+
+### Adding contextual headers to documents already uploaded
+
+New uploads get contextual chunk headers automatically, whatever the file. Documents uploaded before they existed can be upgraded in place, without the original files:
+
+```bash
+python scripts/reindex_context.py --dry-run   # show what would change
+python scripts/reindex_context.py             # stop the API first if you use embedded Qdrant
+```

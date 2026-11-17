@@ -150,6 +150,8 @@ export function AskView({ scrollRef, ...p }: Props) {
             <button onClick={p.onOpenSettings} type="button" className="hover:text-ink">
               {p.settings.topK} sources · {p.settings.mode === "dense" ? "meaning search" : p.settings.mode === "keyword" ? "keyword search" : "hybrid search"}
               {p.settings.rerank ? " · reranked" : ""}
+              {p.settings.agent ? " · tools" : ""}
+              {p.settings.verify ? " · verified" : ""}
               {p.settings.visuals ? " · charts" : ""}
             </button>
           </div>

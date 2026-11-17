@@ -79,10 +79,13 @@ export const STAGES = [
   { key: "embedding_time", label: "Embed", color: "bg-stage-1" },
   { key: "search_time", label: "Search", color: "bg-stage-2" },
   { key: "rerank_time", label: "Rerank", color: "bg-stage-3" },
+  { key: "rewrite_time", label: "Re-search", color: "bg-stage-rewrite" },
   { key: "llm_time", label: "Generate", color: "bg-stage-4" },
+  { key: "verify_time", label: "Verify", color: "bg-stage-verify" },
 ] as const;
 
-type StageTimes = Pick<QueryMetrics, "embedding_time" | "search_time" | "rerank_time" | "llm_time">;
+type StageTimes = Pick<QueryMetrics, "embedding_time" | "search_time" | "rerank_time" | "llm_time"> &
+  Partial<Pick<QueryMetrics, "rewrite_time" | "verify_time">>;
 
 /** Horizontal stacked bar of pipeline stages. */
 export function StageBar({ metrics, height = 6, legend = true }: { metrics: StageTimes; height?: number; legend?: boolean }) {

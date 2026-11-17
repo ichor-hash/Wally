@@ -56,13 +56,15 @@ class Reranker:
             return []
 
         model = self._ensure_model()
+        # Plain chunk text. Reading the contextual header too (contextual.py) cost one top-1 hit in
+        # the evaluation, so the header helps the first-stage search only.
         pairs = [(query, r["payload"].get("text", "")) for r in results]
         logits = model.predict(pairs, convert_to_numpy=True).tolist()
 
         reranked = []
         for r, logit in zip(results, logits):
             item = dict(r)
-            item["vector_score"] = r["score"]
+            item["vector_score"] = r.get("vector_score", r["score"])
             item["rerank_score"] = 1 / (1 + math.exp(-logit))
             item["score"] = item["rerank_score"]
             reranked.append(item)

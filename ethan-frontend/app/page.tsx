@@ -31,7 +31,7 @@ import { Settings, SettingsView } from "@/components/views/SettingsView";
 
 const SETTINGS_KEY = "ethan.settings";
 // Rerank is on by default: the evaluation shows it is what makes grounding labels reliable.
-const DEFAULT_SETTINGS: Settings = { streaming: true, rerank: true, topK: 5, mode: "hybrid", visuals: false };
+const DEFAULT_SETTINGS: Settings = { streaming: true, rerank: true, topK: 5, mode: "hybrid", visuals: false, agent: false, verify: true, correct: true };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -219,9 +219,23 @@ export default function Home() {
         rerank: settings.rerank,
         mode: settings.mode,
         visuals: settings.visuals && (health?.visuals_available ?? false),
+        agent: settings.agent && (health?.agent_available ?? true),
+        verify: settings.verify,
+        correct: settings.correct,
         history: historyBefore(id),
       };
-      patch(id, { stage: "retrieving", error: undefined, answer: "", reranked: settings.rerank, startedAt: Date.now() });
+      patch(id, {
+        stage: "retrieving",
+        error: undefined,
+        answer: "",
+        reranked: settings.rerank,
+        agent: body.agent,
+        steps: [],
+        verification: undefined,
+        correction: null,
+        revised: null,
+        startedAt: Date.now(),
+      });
 
       try {
         if (settings.streaming) {
@@ -232,13 +246,19 @@ export default function Home() {
                 patch(id, {
                   stage: stage as Exchange["stage"],
                   ...(stage === "retrieved"
-                    ? { stageTimes: { embedding_time: Number(data.embedding_time), search_time: Number(data.search_time), rerank_time: Number(data.rerank_time) } }
+                    ? {
+                        stageTimes: { embedding_time: Number(data.embedding_time), search_time: Number(data.search_time), rerank_time: Number(data.rerank_time) },
+                        correction: (data.correction as Exchange["correction"]) ?? null,
+                      }
                     : {}),
                 }),
               onSources: (sources, confidence) => patch(id, { sources, confidence }),
-              onToken: (token) => patch(id, (e) => ({ answer: e.answer + token, stage: "generating" })),
-              onComplete: (queryId, metrics, rl) => {
-                patch(id, { queryId, metrics, stage: "done" });
+              onToken: (token) => patch(id, (e) => ({ answer: e.answer + token, stage: e.stage === "verifying" ? e.stage : "generating" })),
+              onTool: (step) => patch(id, (e) => ({ steps: [...(e.steps ?? []), step] })),
+              onVerification: (verification) => patch(id, { verification }),
+              onRevision: (answer, revised) => patch(id, { answer, revised }),
+              onComplete: (queryId, metrics, rl, extra) => {
+                patch(id, (e) => ({ queryId, metrics, stage: "done", correction: extra?.correction ?? e.correction, revised: extra?.revised ?? e.revised }));
                 if (rl) setRateLimit((prev) => ({ ...rl, upstream: prev?.upstream }));
               },
             },
@@ -246,7 +266,18 @@ export default function Home() {
           );
         } else {
           const res = await search(body);
-          patch(id, { answer: res.answer, sources: res.sources, confidence: res.confidence, metrics: res.metrics, queryId: res.query_id, stage: "done" });
+          patch(id, {
+            answer: res.answer,
+            sources: res.sources,
+            confidence: res.confidence,
+            metrics: res.metrics,
+            queryId: res.query_id,
+            steps: res.steps,
+            verification: res.verification ?? undefined,
+            correction: res.correction,
+            revised: res.revised,
+            stage: "done",
+          });
         }
         refreshStats();
         refreshDocuments();
@@ -272,7 +303,7 @@ export default function Home() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings, toast, health?.visuals_available],
+    [settings, toast, health?.visuals_available, health?.agent_available],
   );
 
   const ask = (raw: string) => {

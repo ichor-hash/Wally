@@ -206,3 +206,31 @@ def test_writes_bump_version_and_stats(db):
 def test_unknown_mode_is_rejected(db):
     with pytest.raises(ValueError):
         db.similarity_search("x", mode="semantic")
+
+
+def test_headings_without_blank_lines_are_found():
+    # What pypdf returns for most PDFs: headings on their own line, no blank lines anywhere
+    body = "This paragraph is long enough to stand on its own as a chunk, like a real policy section does. "
+    text = (
+        "Northwind Travel Policy\n"
+        "Effective 1 January 2026. Applies to all employees who travel for\n"
+        "Northwind business. " + body + "\n"
+        "Hotels\n"
+        "The nightly hotel limit is 180 euros in most cities. " + body + "\n"
+        "Meals and Per Diem\n"
+        "The daily meal allowance is 60 euros. " + body
+    )
+    chunks = DocumentLoader(chunk_size=200).chunk_structured(text)
+    sections = [c["section"] for c in chunks]
+    assert "Hotels" in sections and "Meals and Per Diem" in sections
+    hotel = next(c for c in chunks if c["section"] == "Hotels")
+    assert "180 euros" in hotel["text"]
+    # A wrapped sentence line is not mistaken for a heading
+    assert not any(s.startswith("Northwind business") for s in sections)
+
+
+def test_markdown_headings_directly_above_text():
+    body = " Details that make this section a realistic length for a policy document paragraph."
+    text = "## Eligibility\nAll full-time employees qualify." + body + "\n## Equipment\nA 500 dollar stipend." + body
+    chunks = DocumentLoader(chunk_size=120).chunk_structured(text)
+    assert [c["section"] for c in chunks] == ["Eligibility", "Equipment"]

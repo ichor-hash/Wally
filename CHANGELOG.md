@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.1.0: self-checking answers
+
+### Added
+- **Answer verification (Self-RAG style).** Every cited claim is checked against only the chunks it cites. An unsupported claim triggers one rewrite, which is checked again. The UI shows "3/3 claims verified", a **Checks** panel with the verdict and reason for each claim, and the first draft when an answer was revised.
+- **Corrective re-search (CRAG style).** When the reranker finds only weak evidence, the LLM rewrites the question in the documents' own wording, Ethan searches again, and both pools are reranked together.
+- **Agent tools.** `calculate` (a safe arithmetic evaluator that cannot run code) and `search_documents` (a follow-up search with new numbered sources). Each step is shown under the answer. On per user in Settings.
+- **Contextual chunk headers.** Every chunk of every uploaded file is indexed with its document title and section. PDFs use their embedded title, and headings are found even when a PDF or Markdown file has no blank lines around them. The `llm` mode adds a one-call-per-document summary. `scripts/reindex_context.py` upgrades documents already in the library.
+- **Answer grading** in the evaluation: 31 questions at three pipeline levels, recording verification, revisions, re-searches and tool calls per question. Results are shown in the app's Evaluation view, as committed run logs, and as screenshots in the README.
+- Four calculation questions in the golden set (40 in total).
+- `--only` and `--levels` in `evals/run_evals.py` to re-grade selected cases without a full run.
+- Settings for verification, re-search and agent tools; Re-search and Verify stages in the timing charts; a claims-verified figure on the Performance page.
+- 32 more unit tests (52 in total), using fake models.
+
+### Changed
+- Default model is `openai/gpt-oss-120b`; `gpt-oss-20b` remains available with `LLM_MODEL`.
+- The prompt now asks the model to answer the supported part of a question and say what is missing, instead of refusing outright.
+- The reranker reads plain chunk text. Reading the contextual header too cost one top-1 hit in the evaluation.
+- Next.js 16.4.3 → 16.4.6 (security advisory), zod 4.6.7; `npm audit fix` applied.
+
+### Fixed
+- Corrective re-search without the reranker ignored a better score from the rewritten query.
+- Citation markers on their own line after a list were dropped by the claim extractor, which under-counted verified claims.
+- `gpt-oss` artefacts such as `【commentary】`, LaTeX `\(...\)` and `[(3)]` citations are cleaned from answers.
+- Evaluation runs never store provider error messages, which can include account identifiers, and record failed requests as errors rather than wrong answers.
+
+### Removed
+- The GitHub Actions workflows. Evaluations are shown in the README and the app instead.
+- The legacy Streamlit UI (`app.py`) and the `streamlit` optional dependency; the Next.js app replaced it in v2.
+
+### Results
+- Answers: 28/31 (v2 pipeline) → **31/31**.
+- Claims verified: **34/35** (1 partly supported).
+- Retrieval: 39/40, right chunk first 83%, unanswerable questions caught 4/4.
+
+
 ## v3.0.0: Ethan
 
 Wally is now **Ethan**. This release changes retrieval, measures it, and makes the result cheaper to run and easier to host.

@@ -17,13 +17,15 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
+from answering import AnswerConfig, AnswerOptions, Answerer, EMPTY_ANSWER
+from contextual import MODES as CONTEXT_MODES, build_contexts, summarize_document, with_context
 from costs import AnswerCache, Pricing
 from data_loader import DocumentLoader
 from llm import llm_from_env
-from pipeline import Retriever, RERANK_CANDIDATE_MULTIPLIER, trim_to_budget
+from pipeline import Retriever
 from reranker import Reranker
 from telemetry import Telemetry, RateLimiter
-from vector_db import RAGVectorDB, RETRIEVAL_MODES
+from vector_db import RAGVectorDB
 
 log = logging.getLogger("uvicorn")
 ROOT = Path(__file__).parent
@@ -45,6 +47,11 @@ RATE_LIMIT = int(os.getenv("RATE_LIMIT", "30"))  # queries per minute per client
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "512"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 CHUNK_STRATEGY = os.getenv("CHUNK_STRATEGY", "structure")
+CONTEXTUAL_RETRIEVAL = os.getenv("CONTEXTUAL_RETRIEVAL", "header").strip().lower()
+# Answer quality (docs/EVALUATION.md); each can be overridden per request
+VERIFY_ANSWERS = env_bool("VERIFY_ANSWERS", True)
+REVISE_ANSWERS = env_bool("REVISE_ANSWERS", True)
+CORRECTIVE_RETRIEVAL = env_bool("CORRECTIVE_RETRIEVAL", True)
 RERANK_MODEL = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 GAP_THRESHOLD = float(os.getenv("GAP_THRESHOLD", "0.25"))
 COMPANY_NAME = os.getenv("COMPANY_NAME", "your company")
@@ -61,10 +68,13 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3
 ALLOW_DIRECTORY_INGEST = env_bool("ALLOW_DIRECTORY_INGEST")
 INNGEST_ENABLED = env_bool("INNGEST_ENABLED")
 
+if CONTEXTUAL_RETRIEVAL not in CONTEXT_MODES:
+    raise ValueError(f"CONTEXTUAL_RETRIEVAL must be one of {CONTEXT_MODES}")
+
 SUPPORTED_EXTENSIONS = [".pdf", ".txt", ".md"]
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
-app = FastAPI(title=f"{ASSISTANT_NAME} - Company Knowledge Assistant", version="3.0.0")
+app = FastAPI(title=f"{ASSISTANT_NAME} - Company Knowledge Assistant", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,6 +110,16 @@ try:
 except FileNotFoundError:
     VISUALS_PROMPT = ""
 
+answerer = Answerer(
+    retriever, llm,
+    AnswerConfig(
+        assistant_name=ASSISTANT_NAME, company_name=COMPANY_NAME, company_profile=COMPANY_PROFILE,
+        visuals_prompt=VISUALS_PROMPT, max_context_chars=MAX_CONTEXT_CHARS, max_output_tokens=MAX_OUTPUT_TOKENS,
+        temperature=LLM_TEMPERATURE, gap_threshold=GAP_THRESHOLD, revise=REVISE_ANSWERS,
+    ),
+    pricing,
+)
+
 
 # ============================================================
 # MODELS
@@ -112,9 +132,12 @@ class ChatTurn(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(5, ge=1, le=20)
-    rerank: bool = False
+    rerank: bool = True
     mode: Optional[Literal["hybrid", "dense", "keyword"]] = None  # default: RETRIEVAL_MODE
-    visuals: bool = False  # let the model add an OpenUI chart or table to the answer
+    visuals: bool = False   # let the model add an OpenUI chart or table
+    agent: bool = False     # tools: calculate and search_documents
+    verify: Optional[bool] = None   # check cited claims; default VERIFY_ANSWERS
+    correct: Optional[bool] = None  # re-search weak retrievals; default CORRECTIVE_RETRIEVAL
     history: List[ChatTurn] = Field(default_factory=list)
 
 
@@ -167,132 +190,40 @@ def validate_query(req: SearchRequest):
         raise HTTPException(status_code=503, detail=f"No language model configured: {llm_error}")
 
 
-def retrieve(query: str, top_k: int, use_rerank: bool, mode: Optional[str] = None) -> Dict[str, Any]:
-    """Embed, search and optionally rerank, then keep what fits the context budget."""
-    timings = retriever.retrieve(query, top_k=top_k, rerank=use_rerank, mode=mode)
-    timings["results"] = trim_to_budget(timings["results"], MAX_CONTEXT_CHARS)
-    return timings
-
-
-def format_sources(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    sources = []
-    for i, r in enumerate(results, 1):
-        payload = r["payload"] or {}
-        keyword = r.get("keyword_score")
-        sources.append({
-            "ref": i,
-            "id": str(r["id"]),
-            "score": round(r["score"], 4),
-            "vector_score": round(r.get("vector_score", r["score"]), 4),
-            "keyword_score": round(keyword, 3) if keyword is not None else None,
-            "rerank_score": round(r["rerank_score"], 4) if "rerank_score" in r else None,
-            "matched_by": r.get("matched_by", "dense"),
-            "text": payload.get("text", ""),
-            "source_file": payload.get("source_file", "Unknown"),
-            "chunk_index": payload.get("chunk_index", 0),
-            "section": payload.get("section", ""),
-            "metadata": {k: v for k, v in payload.items() if k != "text"},
-        })
-    return sources
-
-
-def confidence_for(sources: List[Dict[str, Any]], reranked: bool) -> Dict[str, Any]:
-    """Grounding confidence from retrieval scores, so users know when to double-check."""
-    if not sources:
-        return {"level": "none", "score": 0.0}
-    # Hybrid results are ordered by fused rank, so the strongest evidence is not always first
-    top = max(s["rerank_score"] if reranked and s["rerank_score"] is not None else s["vector_score"] for s in sources)
-    high, medium = (0.7, 0.3) if reranked else (0.5, GAP_THRESHOLD)
-    level = "high" if top >= high else "medium" if top >= medium else "low"
-    return {"level": level, "score": round(top, 4)}
-
-
-def build_messages(query: str, sources: List[Dict[str, Any]], history: List[ChatTurn], visuals: bool = False) -> List[dict]:
-    context = "\n\n".join(
-        f"[{s['ref']}] (source: {s['source_file']}, chunk {s['chunk_index']})\n{s['text']}" for s in sources
+def options_for(req: SearchRequest) -> AnswerOptions:
+    return AnswerOptions(
+        top_k=req.top_k, rerank=req.rerank, mode=req.mode,
+        visuals=req.visuals and bool(VISUALS_PROMPT), agent=req.agent,
+        verify=VERIFY_ANSWERS if req.verify is None else req.verify,
+        correct=CORRECTIVE_RETRIEVAL if req.correct is None else req.correct,
+        history=[t.model_dump() for t in req.history],
     )
-    system = (
-        f"You are {ASSISTANT_NAME}, the internal knowledge assistant for {COMPANY_NAME}. "
-        "Answer employee questions using ONLY the numbered context chunks provided. "
-        "Cite every factual claim with its chunk number in square brackets, e.g. [1] or [2][3]. "
-        "If the context does not contain the answer, say so plainly and suggest what document "
-        "or team might have it - never invent policies, numbers or names. "
-        "When a chunk contains a table, read every row before comparing values. "
-        "Be concise and use short paragraphs or bullet lists where it helps readability."
-    )
-    if COMPANY_PROFILE:
-        # Background only: lets the assistant interpret terms like "this fiscal year",
-        # but facts in answers must still come from the cited chunks.
-        system += f"\n\nBackground on {COMPANY_NAME} (for interpreting questions, not a citable source): {COMPANY_PROFILE}"
-    if visuals and VISUALS_PROMPT:
-        system += "\n\n" + VISUALS_PROMPT
-    messages = [{"role": "system", "content": system}]
-    # Keep a short window of prior turns so follow-up questions make sense
-    for turn in history[-6:]:
-        messages.append({"role": turn.role, "content": turn.content[:2000]})
-    messages.append({"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"})
-    return messages
 
 
-def build_metrics(timings: Dict[str, Any], llm_time: float, total_time: float,
-                  usage: Dict[str, int], ttft: Optional[float] = None) -> Dict[str, Any]:
-    prompt_tokens = usage.get("prompt_tokens", 0)
-    completion_tokens = usage.get("completion_tokens", 0)
-    return {
-        "total_time": round(total_time, 3),
-        "embedding_time": round(timings["embedding_time"], 3),
-        "search_time": round(timings["search_time"], 3),
-        "retrieval_time": round(timings["embedding_time"] + timings["search_time"], 3),
-        "rerank_time": round(timings["rerank_time"], 3),
-        "llm_time": round(llm_time, 3),
-        "ttft": round(ttft, 3) if ttft is not None else None,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": usage.get("total_tokens", 0) or prompt_tokens + completion_tokens,
-        "cost_usd": round(pricing.cost(prompt_tokens, completion_tokens), 6),
-        "candidates": timings["candidates"],
-        "mode": timings["mode"],
-        "cached": False,
-        "tokens_saved": 0,
-    }
-
-
-def cache_key_for(req: SearchRequest) -> str:
+def cache_key_for(req: SearchRequest, opts: AnswerOptions) -> str:
     return AnswerCache.key(
-        q=" ".join(req.query.lower().split()), k=req.top_k, rerank=req.rerank, mode=req.mode or RETRIEVAL_MODE,
-        visuals=req.visuals, history=[(t.role, t.content) for t in req.history[-6:]],
+        q=" ".join(req.query.lower().split()), k=opts.top_k, rerank=opts.rerank, mode=opts.mode or RETRIEVAL_MODE,
+        visuals=opts.visuals, agent=opts.agent, verify=opts.verify, correct=opts.correct,
+        history=[(t["role"], t["content"]) for t in opts.history[-6:]],
         index=rag_db.version, model=llm.model if llm else None,
     )
 
 
-def cached_metrics(entry: Dict[str, Any], total_time: float) -> Dict[str, Any]:
-    """Metrics for an answer served from the cache: no model time, no tokens, no cost."""
-    return {
-        "total_time": round(total_time, 3), "embedding_time": 0.0, "search_time": 0.0, "retrieval_time": 0.0,
-        "rerank_time": 0.0, "llm_time": 0.0, "ttft": round(total_time, 3),
-        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0,
-        "candidates": 0, "mode": entry["mode"], "cached": True,
-        "tokens_saved": entry["tokens"], "cost_saved_usd": entry["cost_usd"],
+def cached_result(entry: Dict[str, Any], total_time: float) -> Dict[str, Any]:
+    """A cached answer: same content, but no model time, no tokens and no cost this time."""
+    metrics = {
+        **{k: 0.0 for k in ("embedding_time", "search_time", "retrieval_time", "rerank_time", "rewrite_time", "llm_time", "verify_time")},
+        "total_time": round(total_time, 3), "ttft": round(total_time, 3),
+        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0, "cost_usd": 0.0,
+        "candidates": 0, "mode": entry["metrics"]["mode"], "agent_steps": entry["metrics"].get("agent_steps", 0),
+        "cached": True, "tokens_saved": entry["metrics"]["total_tokens"], "cost_saved_usd": entry["metrics"]["cost_usd"],
     }
+    return {**entry, "metrics": metrics}
 
 
-def remember(key: str, answer: str, sources: List[Dict[str, Any]], confidence: Dict[str, Any], metrics: Dict[str, Any]):
-    if answer.strip() and answer != EMPTY_ANSWER and sources:
-        answer_cache.put(key, {
-            "answer": answer, "sources": sources, "confidence": confidence, "mode": metrics["mode"],
-            "tokens": metrics["total_tokens"], "cost_usd": metrics["cost_usd"],
-        })
-
-
-EMPTY_ANSWER = (
-    "The model used its whole output budget before writing an answer. "
-    "Ask again, or raise MAX_OUTPUT_TOKENS on the server."
-)
-
-NO_RESULTS_ANSWER = (
-    "I couldn't find anything relevant in the knowledge base. "
-    "This question has been logged as a knowledge gap so the team can add the missing documentation."
-)
+def remember(key: str, result: Dict[str, Any]):
+    if result["answer"].strip() and result["answer"] != EMPTY_ANSWER and result["sources"]:
+        answer_cache.put(key, result)
 
 
 # ============================================================
@@ -329,6 +260,11 @@ def health():
         "retrieval_mode": retriever.default_mode if rag_db.hybrid_available else "dense",
         "hybrid_available": rag_db.hybrid_available,
         "visuals_available": bool(VISUALS_PROMPT),
+        "contextual_retrieval": CONTEXTUAL_RETRIEVAL,
+        "verify_answers": VERIFY_ANSWERS,
+        "revise_answers": REVISE_ANSWERS,
+        "corrective_retrieval": CORRECTIVE_RETRIEVAL,
+        "agent_available": llm is not None and hasattr(llm, "chat_with_tools"),
         "collection": rag_db.collection,
         "dimension": rag_db.dimension,
         "chunk_size": CHUNK_SIZE,
@@ -418,9 +354,20 @@ def ingest_file_path(file_path: str, display_name: str, metadata: Optional[dict]
             "char_count": len(chunk["text"]),
         })
 
+    # Contextual retrieval: index each chunk with its document title and section (contextual.py)
+    full_text = loader.load_file(file_path)
+    summarizer = (lambda text: summarize_document(text, llm)) if CONTEXTUAL_RETRIEVAL == "llm" and llm else None
+    contexts = build_contexts(chunks, full_text, display_name, CONTEXTUAL_RETRIEVAL, summarizer, title=loader.file_title(file_path))
+    for chunk, context in zip(chunks, contexts):
+        if context:
+            chunk["metadata"]["context"] = context
+
     replaced = rag_db.delete_by_source(display_name)
     t0 = time.perf_counter()
-    ids = rag_db.add_texts([c["text"] for c in chunks], metadata=[c["metadata"] for c in chunks])
+    ids = rag_db.add_texts(
+        [c["text"] for c in chunks], metadata=[c["metadata"] for c in chunks],
+        index_texts=[with_context(c["text"], ctx) for c, ctx in zip(chunks, contexts)],
+    )
     return {
         "status": "ok",
         "file": display_name,
@@ -628,54 +575,44 @@ def get_document_chunks(doc_name: str):
 @app.post("/search")
 def search(req: SearchRequest, request: Request):
     """
-    Retrieve relevant chunks and generate a cited answer (non-streaming).
-
-    Returns answer, sources, confidence and a latency/token/cost breakdown.
+    Retrieve, answer, verify. Returns answer, sources, grounding label, verification,
+    agent steps and a latency/token/cost breakdown in one response.
     """
     client = enforce_rate_limit(request)
     validate_query(req)
+    opts = options_for(req)
     start = time.perf_counter()
     query_id = uuid.uuid4().hex
-    key = cache_key_for(req)
+    key = cache_key_for(req, opts)
 
     cached = answer_cache.get(key)
     if cached:
-        answer, sources, confidence = cached["answer"], cached["sources"], cached["confidence"]
-        metrics = cached_metrics(cached, time.perf_counter() - start)
+        result = cached_result(cached, time.perf_counter() - start)
     else:
         try:
-            timings = retrieve(req.query, req.top_k, req.rerank, req.mode)
-            sources = format_sources(timings["results"])
-            if not sources:
-                answer, usage, llm_time = NO_RESULTS_ANSWER, {}, 0.0
-            else:
-                t0 = time.perf_counter()
-                answer, usage = llm.chat_with_usage(
-                    build_messages(req.query, sources, req.history, req.visuals),
-                    temperature=LLM_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS,
-                )
-                llm_time = time.perf_counter() - t0
-                if not answer.strip():
-                    answer = EMPTY_ANSWER
+            result = answerer.answer(req.query, opts)
         except Exception as e:
             log.exception("Search error")
             raise HTTPException(status_code=500, detail=f"Error during search: {str(e)}")
-        confidence = confidence_for(sources, req.rerank)
-        metrics = build_metrics(timings, llm_time, time.perf_counter() - start, usage)
-        remember(key, answer, sources, confidence, metrics)
+        remember(key, result)
 
-    telemetry.record_query(query_id, req.query, metrics, sources)
+    telemetry.record_query(query_id, req.query, {**result["metrics"], **verification_metrics(result)}, result["sources"])
     return JSONResponse(
-        {
-            "query_id": query_id,
-            "answer": answer,
-            "sources": sources,
-            "confidence": confidence,
-            "reranked": req.rerank,
-            "metrics": metrics,
-        },
+        {"query_id": query_id, "reranked": opts.rerank, **result},
         headers=rate_limit_headers(client),
     )
+
+
+def verification_metrics(result: Dict[str, Any]) -> Dict[str, Any]:
+    v = result.get("verification") or {}
+    return {
+        "verified": v.get("status") == "ok",
+        "claims": v.get("total", 0),
+        "claims_supported": v.get("supported", 0),
+        "faithfulness": v.get("score"),
+        "revised": bool(result.get("revised")),
+        "corrected": bool((result.get("correction") or {}).get("improved")),
+    }
 
 
 def sse(event: str, data: Dict[str, Any]) -> str:
@@ -687,12 +624,13 @@ def search_stream(req: SearchRequest, request: Request):
     """
     Same pipeline as /search, streamed as Server-Sent Events.
 
-    Events: stage, sources, token, complete, error
+    Events: stage, sources, token, tool, verification, revision, complete, error
     """
     client = enforce_rate_limit(request)
     validate_query(req)
+    opts = options_for(req)
     query_id = uuid.uuid4().hex
-    key = cache_key_for(req)
+    key = cache_key_for(req, opts)
 
     # A sync generator: Starlette iterates it in a threadpool, so blocking
     # model calls don't stall the event loop.
@@ -700,58 +638,32 @@ def search_stream(req: SearchRequest, request: Request):
         start = time.perf_counter()
         try:
             yield sse("stage", {"stage": "retrieving", "query_id": query_id})
-
             cached = answer_cache.get(key)
             if cached:
-                sources = cached["sources"]
-                yield sse("stage", {"stage": "retrieved", "embedding_time": 0, "search_time": 0, "rerank_time": 0,
-                                    "results_found": len(sources), "cached": True})
-                yield sse("sources", {"sources": sources, "confidence": cached["confidence"], "reranked": req.rerank})
-                yield sse("token", {"token": cached["answer"]})
-                metrics = cached_metrics(cached, time.perf_counter() - start)
-                telemetry.record_query(query_id, req.query, metrics, sources)
-                yield sse("complete", {"query_id": query_id, "metrics": metrics, "rate_limit": rate_limiter.status(client)})
-                return
-
-            timings = retrieve(req.query, req.top_k, req.rerank, req.mode)
-            sources = format_sources(timings["results"])
-            confidence = confidence_for(sources, req.rerank)
-            yield sse("stage", {
-                "stage": "retrieved",
-                "mode": timings["mode"],
-                "embedding_time": round(timings["embedding_time"], 3),
-                "search_time": round(timings["search_time"], 3),
-                "rerank_time": round(timings["rerank_time"], 3),
-                "results_found": len(sources),
-            })
-            yield sse("sources", {"sources": sources, "confidence": confidence, "reranked": req.rerank})
-
-            usage, llm_time, ttft, parts = {}, 0.0, None, []
-            if not sources:
-                yield sse("token", {"token": NO_RESULTS_ANSWER})
+                result = cached_result(cached, time.perf_counter() - start)
+                yield sse("stage", {"stage": "retrieved", "cached": True, "results_found": len(result["sources"])})
+                yield sse("sources", {"sources": result["sources"], "confidence": result["confidence"], "reranked": opts.rerank})
+                for step in result.get("steps") or []:
+                    yield sse("tool", step)
+                yield sse("token", {"token": result["answer"]})
+                if result.get("verification"):
+                    yield sse("verification", result["verification"])
             else:
-                yield sse("stage", {"stage": "generating"})
-                t0 = time.perf_counter()
-                stream = llm.stream_chat(
-                    build_messages(req.query, sources, req.history, req.visuals),
-                    temperature=LLM_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS,
-                )
-                for kind, value in stream:
-                    if kind == "token":
-                        if ttft is None:
-                            ttft = time.perf_counter() - start
-                        parts.append(value)
-                        yield sse("token", {"token": value})
-                    elif kind == "usage":
-                        usage = value
-                llm_time = time.perf_counter() - t0
-                if not "".join(parts).strip():
-                    yield sse("token", {"token": EMPTY_ANSWER})
+                result = {}
+                for kind, data in answerer.run(req.query, opts):
+                    if kind == "complete":
+                        result = data
+                    elif kind == "stage" and data.get("stage") == "retrieving":
+                        continue
+                    else:
+                        yield sse(kind, data)
+                remember(key, result)
 
-            metrics = build_metrics(timings, llm_time, time.perf_counter() - start, usage, ttft)
-            remember(key, "".join(parts), sources, confidence, metrics)
-            telemetry.record_query(query_id, req.query, metrics, sources)
-            yield sse("complete", {"query_id": query_id, "metrics": metrics, "rate_limit": rate_limiter.status(client)})
+            telemetry.record_query(query_id, req.query, {**result["metrics"], **verification_metrics(result)}, result["sources"])
+            yield sse("complete", {
+                "query_id": query_id, "metrics": result["metrics"], "rate_limit": rate_limiter.status(client),
+                "correction": result.get("correction"), "revised": result.get("revised"),
+            })
         except Exception as e:
             log.exception("Streaming search error")
             yield sse("error", {"error": str(e)})
@@ -811,12 +723,13 @@ if INNGEST_ENABLED:
             return {"error": f"No language model configured: {llm_error}"}
 
         def run():
-            timings = retrieve(query, data.get("top_k", 5), data.get("rerank", False), data.get("mode"))
-            sources = format_sources(timings["results"])
-            if not sources:
-                return {"answer": NO_RESULTS_ANSWER, "sources": []}
-            answer, usage = llm.chat_with_usage(build_messages(query, sources, []), temperature=LLM_TEMPERATURE, max_tokens=MAX_OUTPUT_TOKENS)
-            return {"answer": answer, "usage": usage, "sources": [{"id": s["id"], "score": s["score"]} for s in sources]}
+            opts = AnswerOptions(top_k=data.get("top_k", 5), rerank=data.get("rerank", True), mode=data.get("mode"),
+                                 verify=VERIFY_ANSWERS, correct=CORRECTIVE_RETRIEVAL)
+            result = answerer.answer(query, opts)
+            return {
+                "answer": result["answer"], "metrics": result["metrics"], "verification": result["verification"],
+                "sources": [{"id": s["id"], "score": s["score"]} for s in result["sources"]],
+            }
 
         return await run_in_threadpool(run)
 

@@ -1,84 +1,113 @@
 # Evaluation
 
-Ethan is measured, not described. Every change to retrieval runs against a fixed set of questions with known answers, and the results, failures included, are committed in [`evals/results/REPORT.md`](../evals/results/REPORT.md), shown in the app's **Evaluation** view, and checked by CI on every push.
+Ethan is measured, not described. A fixed set of questions with known answers is run through every retrieval setup and through the full answering pipeline, and every result is committed:
 
-![Evaluation view](screenshots/07-evaluation.png)
+- [`evals/results/REPORT.md`](../evals/results/REPORT.md): every case, passed and failed, with the reason.
+- [`evals/results/latest.json`](../evals/results/latest.json): the raw report, shown in the app's **Evaluation** view.
+- [`evals/results/run-answers.log`](../evals/results/run-answers.log): the console output of the run.
+
+Last full run: **17 November 2026**, `openai/gpt-oss-120b` via Groq, CPU embeddings and reranker.
+
+## Results at a glance
+
+| | v2 pipeline | **v3 (default)** | v3 + agent tools |
+|---|---|---|---|
+| Answers correct | 28/31 | **31/31** | **31/31** |
+| Claims verified against their sources | not checked | **34/35** | **32/32** |
+| Right chunk ranked first (retrieval) | 50% | **83%** | 83% |
+| Right chunk in the top 5 | 89% | **97%** | 97% |
+| Unanswerable questions caught at retrieval | 1 of 4 | **4 of 4** | 4 of 4 |
+| Tokens per question | 1,127 | 1,679 | 2,090 |
+| Model calls per question | 1.0 | 2.3 | 2.4 |
+| Seconds per question, free tier | 5.2 | 9.1 | 12.2 |
+
+## The run
+
+![Retrieval evaluation run](screenshots/eval-run-retrieval.png)
+
+![Answer grading, v3](screenshots/eval-run-answers-v3.png)
+
+![Answer grading, v3 with agent tools](screenshots/eval-run-answers-agent.png)
+
+<details><summary>Answer grading, v2 pipeline (the baseline)</summary>
+
+![Answer grading, v2](screenshots/eval-run-answers-v2.png)
+
+</details>
+
+The same results in the app, where every graded answer can be opened and read:
+
+![Evaluation view](screenshots/09-evaluation.png)
+
+![Answer grading in the app](screenshots/09b-answer-grading.png)
+
+![Graded answers, v2 next to v3](screenshots/09c-graded-answers.png)
 
 ## What is tested
 
-[`evals/golden.json`](../evals/golden.json) holds **36 questions** over three documents: the Apple FY2025 10-K Risk Factors and MD&A sections in `demo/`, and the sample remote-work policy.
+[`evals/golden.json`](../evals/golden.json) holds **40 questions** over three documents: Apple's FY2025 10-K Risk Factors and MD&A sections (`demo/`), and a sample remote-work policy (`docs/samples/`).
 
 | Type | Count | What it catches |
 |---|---|---|
-| Semantic | 17 | Paraphrased questions with little word overlap ("What could happen if hackers break into the company's systems?") |
-| Keyword | 11 | Exact identifiers that embeddings blur: `ASU 2025-06`, `Section 232`, `TCJA`, `iPhone 16e` |
-| Table | 4 | Answers that need a complete table: the fastest-growing segment, R&D spend over three years |
-| Unanswerable | 4 | Questions the documents cannot answer: parental leave, dress code, Microsoft's CEO |
+| Semantic | 17 | Paraphrases with little word overlap: "What could happen if hackers break into the company's systems?" |
+| Keyword | 11 | Exact identifiers embeddings blur: `ASU 2025-06`, `Section 232`, `TCJA`, `iPhone 16e` |
+| Table | 4 | Answers that need a whole table: the fastest-growing segment, R&D over three years |
+| Calculation | 4 | Arithmetic on numbers in the documents: Services' share of sales, gross-margin growth |
+| Unanswerable | 4 | Not in the documents: parental leave, dress code, Microsoft's CEO, vacation days |
 
-Relevance is labelled by **phrases**, not chunk ids: a chunk is relevant if it contains every phrase in one of the case's groups. Labels therefore survive re-chunking, and the same golden set can compare chunking strategies fairly. The harness also flags any label that no chunk can satisfy, so an unreachable label is reported as a chunking limitation rather than silently counted as a retrieval miss.
+31 of the 40 have an answer key and are used for answer grading; the other 9 test retrieval only.
 
-## Two levels
+## How it is graded
 
-**Retrieval** (`python evals/run_evals.py`, no API key, about a minute on a laptop CPU). It builds an in-memory index from the demo corpus and runs each question through five configurations, using the same `pipeline.py` the API serves:
-
+**Retrieval** (`python evals/run_evals.py`; no API key, about a minute on a laptop CPU). It builds in-memory indexes from the corpus and runs every question through seven setups, using the same `pipeline.py` the API serves.
 - A question **passes** if a chunk containing the answer is in the top 5.
-- An unanswerable question passes if retrieval reports *weak grounding* (best cosine below 0.25, or best rerank relevance below 0.30). That is what makes the UI warn the user and log a knowledge gap.
+- Relevance is labelled by phrases, not chunk ids, so labels survive re-chunking.
+- An unanswerable question passes if retrieval reports *weak grounding*. That is what makes the app warn the user and log a knowledge gap.
 
-**Answers** (`python evals/run_evals.py --answers`, needs an LLM key). It generates real answers with the API's own prompt and grades them automatically:
-
+**Answers** (`python evals/run_evals.py --answers`; needs an LLM key). Each question goes through `answering.py`, the exact code behind `/search`, at three levels, and is graded automatically:
 - Required facts must appear (regular expressions, e.g. `Japan` and `15`).
-- Answerable questions must carry a `[n]` citation.
+- Answerable questions must cite a chunk as `[n]`.
 - Unanswerable questions must be declined.
 
-## Results
+The run also records what the pipeline did on each question: corrective re-searches, tool calls, the verifier's verdict on each claim, and revisions.
 
-### Retrieval
+## What each part of v3 bought
 
-| Configuration | Passed | Right chunk first | Right chunk in top 5 | MRR | Unanswerable caught | Latency |
-|---|---|---|---|---|---|---|
-| v2 baseline: fixed 512-char chunks, dense only | 29/36 | 53% | 88% | 0.67 | 25% | 10 ms |
-| Structure-aware chunks, dense only | 28/36 | 66% | 84% | 0.74 | 25% | 10 ms |
-| Structure-aware chunks, BM25 keyword only | 31/36 | 62% | 91% | 0.73 | 50% | 12 ms |
-| Structure-aware chunks, hybrid (dense + BM25, RRF) | 31/36 | 75% | 94% | 0.82 | 25% | 13 ms |
-| **Hybrid + cross-encoder rerank (default)** | **35/36** | **91%** | **97%** | **0.93** | **100%** | 251 ms |
+| Change | Measured effect |
+|---|---|
+| **Structure-aware chunking** | Tables stay whole with their caption. Table questions: 2/4 → 4/4 at retrieval, 2/4 → 4/4 in answers. |
+| **Hybrid search (BM25 + vectors, RRF)** | Exact-term questions 10/11 → 11/11. Right chunk in top 5: 89% → 94%. |
+| **Contextual chunk headers** | Each chunk is indexed with its document title and section. Without the reranker: right chunk first 67% → 72%, in the top 5 94% → 97%. **With the reranker the effect on this set is nil** (83% either way). It stays on because it is free and helps the first-stage search; for very large libraries, that is where it matters. |
+| **Cross-encoder reranking** | Right chunk first 72% → 83%. Unanswerable questions caught 1/4 → 4/4: cosine similarity cannot tell "related" from "answers the question", and the reranker can. |
+| **Corrective re-search** | Re-searched 3 of 31 graded questions, all unanswerable ones. The rewritten search still found nothing that answers them, and all three were correctly declined. In a spot check it rescued the one retrieval failure (`s12`, "important employees leave" → "departure of key employees"). That question has no answer key, so it is not in the graded total. |
+| **Answer verification** | 35 cited claims checked in v3: 34 supported, 1 partly supported, none unsupported. 4 of 31 drafts were rewritten after a claim failed the check, and every rewrite then passed. |
+| **Agent tools** | 4 calculator calls, all exact. On `gpt-oss-120b` the arithmetic questions were already right without tools. On `gpt-oss-20b` (an earlier run), plain v3 got the gross-margin percentage wrong and the calculator fixed it. With a strong model the value is exact, auditable arithmetic shown under the answer. |
 
-| Passed by type | semantic | keyword | table | unanswerable |
-|---|---|---|---|---|
-| v2 baseline | 16/17 | 10/11 | 2/4 | 1/4 |
-| hybrid | 16/17 | 11/11 | 3/4 | 1/4 |
-| hybrid + rerank | 16/17 | 11/11 | **4/4** | **4/4** |
+The v2 failures, for the record: it named the wrong segment and missed Japan's +15% (`t01`), dropped one year of the R&D series (`t04`), and missed AirPods Pro 3 from a product list (`s17`). All three were caused by chunks cutting through a table or list.
 
-### Answers (`openai/gpt-oss-20b` via Groq)
+## Honest notes
 
-| Configuration | Correct | Prompt tokens | Completion tokens |
-|---|---|---|---|
-| v2 baseline | 24/27 | 954 | 84 |
-| **Hybrid + rerank (default)** | **27/27** | **826** | **78** |
+- **One retrieval failure remains** without an LLM in the loop: `s12`, "What is the risk if important employees leave?". The relevant sentence ("key personnel") shares no words with the question, and the small embedding model ranks a natural-disasters passage higher. Corrective re-search finds it when it runs.
+- **The verifier is strict, and was once wrong.** An early version checked the line "Growth rate: 15%" without the line above it naming Japan, compared it with *total* net sales growth (6%), and flagged it. Cited lines now carry the uncited lines directly above them as context. The two affected questions were re-graded (below).
+- **Re-grades.** After the full run, two fixes touched a few questions, and those were re-run with `--only` instead of spending a full run's tokens. Everything else is from the full run.
+  - Markdown headings directly above their text are now detected, which changed the policy document's chunks: `s14`, `s15`, `k09` were re-graded.
+  - The claim-context fix above: `t01`, `k04` were re-graded.
+  - Both re-grades kept every answer correct. The log of the latest one is [`run-answers-regrade.log`](../evals/results/run-answers-regrade.log).
+- **The grader is literal.** A correct answer that spelled out "fifteen percent" would fail a `15` check. Read failures in the report before trusting a regression.
+- **The checks cost time and tokens**: about 50% more tokens and 1.8 times the latency of the v2 pipeline on the free tier. [COSTS.md](COSTS.md) has the trade-offs and the switches.
+- **Free-tier limits shape what can be run.** Groq's free tier allows 200,000 tokens per model per day, and a full three-level answer run uses about 150,000. The harness retries rate-limited calls. A call that still fails is recorded as an error, never as a wrong answer, and the provider's message is not stored.
 
-The v2 setup got three questions wrong. Two were tables and one was a list. The headline case: asked which segment grew fastest, v2 answered **"Europe, +10%"** and labelled it *well grounded*, which is wrong. The correct answer is Japan, +15%. v3 answers correctly because the segment table is now one chunk.
+## Running it
 
-## What each change bought
+```bash
+python evals/run_evals.py                          # retrieval, all seven setups (free)
+python evals/run_evals.py --answers                # also grade answers at all three levels
+python evals/run_evals.py --answers --levels v3    # one level
+python evals/run_evals.py --answers --only t01,k04 # re-grade a few cases, keep the rest
+python evals/run_evals.py --check                  # exit 1 if the default setup regresses
+```
 
-- **Structure-aware chunking** fixed the table failures. Fixed 512-character windows had cut Apple's segment table between its caption and the Japan row, so no single chunk held the answer. Tables now stay whole with their caption and section heading. On its own this does not raise the dense-only pass count, because smaller paragraph chunks are harder to match by meaning; it pays off together with hybrid search.
-- **BM25 keyword search** found every exact-identifier question (11/11). `iPhone 16e` is the clearest case: dense search ranked a table of iPad numbers first.
-- **Reciprocal rank fusion** combines both rankings. It puts the right chunk first in 75% of cases, against 62% for keywords and 66% for meaning alone.
-- **The cross-encoder reranker** is what makes the grounding label honest. Cosine similarity cannot separate "related" from "answers the question": the parental-leave question scores 0.39 against Apple's 10-K preamble. The reranker's relevance score drops to near zero for such cases, so all four unanswerable questions are caught, against one before. That is why reranking is on by default.
-
-## Known failures, kept visible
-
-- **`s12` "What is the risk if important employees leave?"** fails in every configuration. The relevant sentence ("the continued service and availability of highly skilled employees, including key personnel") shares no keyword with the question, and the embedding model ranks a natural-disasters passage higher. A larger embedding model is the likely fix (see the model notes in the README).
-- **Answer `s17`** (fourth-quarter products) passed only after the chunker learned to keep a "Fourth Quarter 2025:" label with the list that follows it. It is a reminder that answer quality depends on chunk boundaries.
-- **The grader is strict and literal.** A correct answer written as "a 15 percent rise" would fail a `15` regex check if the model spelled out the number. Read failures in the report before trusting a regression.
-
-## In CI
-
-`.github/workflows/ci.yml` runs the retrieval evaluation on every push and pull request:
-
-- The job **fails** if hybrid + rerank drops below Hit@5 0.93, MRR 0.80 or 75% unanswerable caught, or if plain hybrid drops below Hit@5 0.90 or MRR 0.70.
-- The thresholds sit a little under the measured numbers, so a real regression fails the build and run-to-run noise does not.
-- The full pass/fail table appears on the run's summary page and is uploaded as the `eval-report` artifact.
-
-The answer evaluation costs tokens, so it runs only on demand: **Actions → Answer evaluation → Run workflow**. Add a `GROQ_API_KEY` repository secret first.
+Use `LLM_MODEL` to grade a different model, for example `LLM_MODEL=openai/gpt-oss-20b`.
 
 ## Adding cases
 
@@ -89,4 +118,4 @@ Add an entry to `evals/golden.json`:
  "relevant": [["VPN", "public networks"]], "answer": {"all": ["VPN"]}}
 ```
 
-Then run `python evals/run_evals.py`. To evaluate your own documents, change `corpus` to point at them and write cases from questions your users actually ask. The **Knowledge gaps** view is a good source.
+To evaluate your own documents, point `corpus` at them and write cases from questions your users actually ask. The **Knowledge gaps** view is a good source. Questions that fail there are the ones worth adding.

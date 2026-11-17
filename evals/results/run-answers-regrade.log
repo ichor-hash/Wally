@@ -1,0 +1,27 @@
+$ python evals/run_evals.py --answers
+
+Retrieval: 40 questions, top 5
+
+  configuration              passed   hit@1   hit@5    MRR  rejects   latency
+  baseline-v2                33/40      50%     89%   0.65      25%      21 ms
+  dense                      32/40      61%     86%   0.71      25%      25 ms
+  keyword                    33/40      58%     86%   0.70      50%      24 ms
+  hybrid                     35/40      67%     94%   0.78      25%      34 ms
+  hybrid+rerank              39/40      83%     97%   0.87     100%     488 ms
+  hybrid+context             36/40      72%     97%   0.82      25%      34 ms
+  hybrid+context+rerank *    39/40      83%     97%   0.87     100%     520 ms
+  * default
+
+Answers: v3  (v3: hybrid + context + rerank, corrective search, verification)
+  PASS  k04  TCJA deemed repatriation tax payable balance                      verified 1/1
+  PASS  t01  Which reportable segment grew fastest in 2025, and by how much?   verified 1/1
+  (re-graded k04, t01; other cases kept from the previous full run)
+  => 31/31 correct, 34/35 claims verified, 1679 tokens and 2.29 LLM calls per question
+
+Answers: v3+agent  (v3 + agent tools (calculate, search_documents))
+  PASS  k04  TCJA deemed repatriation tax payable balance                      verified 1/1
+  PASS  t01  Which reportable segment grew fastest in 2025, and by how much?   verified 1/1
+  (re-graded k04, t01; other cases kept from the previous full run)
+  => 31/31 correct, 32/32 claims verified, 2090 tokens and 2.42 LLM calls per question
+
+Regression check: PASS

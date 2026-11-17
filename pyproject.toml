@@ -1,7 +1,7 @@
 [project]
 name = "ethan"
-version = "3.0.0"
-description = "Company knowledge assistant: hybrid retrieval, reranking, cited answers, OpenUI charts, cost tracking and CI evaluations"
+version = "3.1.0"
+description = "Company knowledge assistant: hybrid and contextual retrieval, reranking, corrective search, agent tools, verified cited answers, OpenUI charts and cost tracking"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,7 +18,6 @@ dependencies = [
 
 [project.optional-dependencies]
 events = ["inngest>=0.5.19"]
-legacy-ui = ["streamlit>=1.66.1"]
 dev = ["pytest>=9.1", "httpx>=0.28"]
 
 [tool.pytest.ini_options]

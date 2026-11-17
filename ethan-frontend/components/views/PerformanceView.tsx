@@ -180,7 +180,11 @@ export function PerformanceView({ metrics }: { metrics: MetricsSummary | null })
         <Figure label="Median response" value={formatMs(has ? m.p50_total_time : null)} note={has ? `95th percentile ${formatMs(m.p95_total_time)}` : undefined} />
         <Figure label="First token" value={formatMs(has && m.avg_ttft ? m.avg_ttft : null)} note="average, streamed" />
         <Figure label="Tokens per answer" value={has ? m.avg_tokens.toLocaleString() : "–"} note={has ? `${m.total_tokens.toLocaleString()} in total` : undefined} />
-        <Figure label="Questions" value={has ? m.count.toLocaleString() : "0"} note={has ? `${m.lifetime.queries.toLocaleString()} all time` : "none yet"} />
+        <Figure
+          label="Claims verified"
+          value={has && m.faithfulness != null ? `${Math.round(m.faithfulness * 100)}%` : "–"}
+          note={has ? `${m.verified_answers ?? 0} answers checked, ${m.revised_answers ?? 0} revised` : "none yet"}
+        />
       </div>
 
       {!has ? (
@@ -191,10 +195,17 @@ export function PerformanceView({ metrics }: { metrics: MetricsSummary | null })
             <SectionTitle>Where the time goes</SectionTitle>
             <StageBar
               height={10}
-              metrics={{ embedding_time: m.avg_embedding_time, search_time: m.avg_search_time, rerank_time: m.avg_rerank_time, llm_time: m.avg_llm_time }}
+              metrics={{
+                embedding_time: m.avg_embedding_time,
+                search_time: m.avg_search_time,
+                rerank_time: m.avg_rerank_time,
+                rewrite_time: m.avg_rewrite_time ?? 0,
+                llm_time: m.avg_llm_time,
+                verify_time: m.avg_verify_time ?? 0,
+              }}
             />
             <p className="mt-4 max-w-xl text-[13px] leading-relaxed text-faint">
-              Averages across recent questions. Embedding and vector search run locally; generation is the round trip to the language model.
+              Averages across recent questions. Embedding, search and reranking run locally; re-search, generation and verification are round trips to the language model.
             </p>
           </section>
 

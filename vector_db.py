@@ -126,16 +126,30 @@ class RAGVectorDB:
             self._id_seq = base + n
         return [base + i for i in range(n)]
 
-    def add_texts(self, texts: List[str], ids: Optional[list] = None, metadata: Optional[List[dict]] = None, batch_size: int = 256):
-        """Embed texts (dense + BM25) and store them. Returns the point ids."""
+    def add_texts(
+        self,
+        texts: List[str],
+        ids: Optional[list] = None,
+        metadata: Optional[List[dict]] = None,
+        batch_size: int = 256,
+        index_texts: Optional[List[str]] = None,
+    ):
+        """
+        Embed texts (dense + BM25) and store them. Returns the point ids.
+
+        index_texts, when given, is what gets embedded and keyword-indexed (for
+        example the chunk with its document context prefixed, see contextual.py);
+        `texts` is what is stored and shown.
+        """
         if not texts:
             return []
         ids = ids or self._next_ids(len(texts))
+        index_texts = index_texts or texts
         payloads = [{**(metadata[i] if metadata else {}), "text": text} for i, text in enumerate(texts)]
-        vectors = self.embedder.embed(texts)
+        vectors = self.embedder.embed(index_texts)
 
         points = []
-        for pid, dense, text, payload in zip(ids, vectors, texts, payloads):
+        for pid, dense, text, payload in zip(ids, vectors, index_texts, payloads):
             if self.legacy:
                 vector: Any = dense
             else:

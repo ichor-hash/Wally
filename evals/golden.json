@@ -9,47 +9,570 @@
     "relevant": "A chunk is relevant if it contains every phrase of at least one group (case-insensitive). Phrase labels survive re-chunking; chunk ids would not.",
     "answer.all": "Every regex must match the generated answer (case-insensitive).",
     "answer.refuse": "The question is not answerable from the corpus; the answer must say so.",
-    "categories": "semantic = paraphrased, little word overlap. keyword = exact identifiers, codes, names. table = the answer needs a complete table. unanswerable = nothing in the corpus; retrieval must report weak grounding."
+    "categories": "semantic = paraphrased, little word overlap. keyword = exact identifiers, codes, names. table = the answer needs a complete table. calculation = the answer needs arithmetic on numbers in the documents. unanswerable = nothing in the corpus; retrieval must report weak grounding and the answer must decline."
   },
   "cases": [
-    {"id": "s01", "category": "semantic", "question": "What risks does Apple face from relying on outsourcing partners and single-source suppliers?", "relevant": [["single-source"], ["outsourcing partners located primarily"]]},
-    {"id": "s02", "category": "semantic", "question": "Why did Greater China net sales decline in 2025?", "relevant": [["Greater China net sales decreased"]], "answer": {"all": ["iPhone"]}},
-    {"id": "s03", "category": "semantic", "question": "How did U.S. tariffs affect Apple in fiscal 2025?", "relevant": [["new U.S. Tariffs were announced"], ["tariff costs"]], "answer": {"all": ["tariff"]}},
-    {"id": "s04", "category": "semantic", "question": "Why did the Services gross margin percentage go up?", "relevant": [["Services gross margin percentage increased"]], "answer": {"all": ["mix of services"]}},
-    {"id": "s05", "category": "semantic", "question": "How much stock did Apple buy back and how much did it return in dividends during 2025?", "relevant": [["repurchased $89.3 billion"]], "answer": {"all": ["89\\.3", "15\\.4"]}},
-    {"id": "s06", "category": "semantic", "question": "What drove the sales increase in Japan?", "relevant": [["Japan net sales increased"]], "answer": {"all": ["iPhone", "Services", "iPad"]}},
-    {"id": "s07", "category": "semantic", "question": "How much cash and marketable securities does the company hold?", "relevant": [["$132.4 billion"]], "answer": {"all": ["132\\.4"]}},
-    {"id": "s08", "category": "semantic", "question": "Why was the effective tax rate below the statutory rate?", "relevant": [["lower than the statutory federal income tax rate"]], "answer": {"all": ["foreign earnings"]}},
-    {"id": "s09", "category": "semantic", "question": "What could happen if hackers break into the company's systems?", "relevant": [["ransomware"], ["unauthorized access"]]},
-    {"id": "s10", "category": "semantic", "question": "How does a strong dollar hurt the company's results?", "relevant": [["U.S. dollar value of the Company"]]},
-    {"id": "s11", "category": "semantic", "question": "Does Apple depend on mobile operators to sell its phones?", "relevant": [["cellular network carriers and other resellers"]]},
-    {"id": "s12", "category": "semantic", "question": "What is the risk if important employees leave?", "relevant": [["highly skilled employees, including key personnel"]]},
-    {"id": "s13", "category": "semantic", "question": "How could natural disasters or a changing climate disrupt operations?", "relevant": [["Global climate change"], ["earthquakes"]]},
-    {"id": "s14", "category": "semantic", "question": "How many days a week can staff work from home?", "relevant": [["three days per week"]], "answer": {"all": ["three|3"]}},
-    {"id": "s15", "category": "semantic", "question": "What allowance do I get for home office furniture?", "relevant": [["500 dollars"]], "answer": {"all": ["500"]}},
-    {"id": "s16", "category": "semantic", "question": "What made research and development spending grow?", "relevant": [["growth in R&D expense"]], "answer": {"all": ["headcount"]}},
-    {"id": "s17", "category": "semantic", "question": "Which new products were announced in the fourth quarter?", "relevant": [["iPhone 17 Pro Max"]], "answer": {"all": ["iPhone 17", "AirPods Pro 3"]}},
-
-    {"id": "k01", "category": "keyword", "question": "ASU 2025-06 effective date", "relevant": [["ASU 2025-06 will be effective"]], "answer": {"all": ["2029"]}},
-    {"id": "k02", "category": "keyword", "question": "Section 232 investigation", "relevant": [["Section 232"]], "answer": {"all": ["semiconductor"]}},
-    {"id": "k03", "category": "keyword", "question": "DMA compliance changes", "relevant": [["Digital Markets Act"]]},
-    {"id": "k04", "category": "keyword", "question": "TCJA deemed repatriation tax payable balance", "relevant": [["deemed repatriation tax payable"]], "answer": {"all": ["8\\.8"]}},
-    {"id": "k05", "category": "keyword", "question": "When will ASU 2023-09 be adopted?", "relevant": [["will adopt ASU 2023-09"]], "answer": {"all": ["2026"]}},
-    {"id": "k06", "category": "keyword", "question": "State Aid Decision impact", "relevant": [["State Aid Decision"]], "answer": {"all": ["10\\.7"]}},
-    {"id": "k07", "category": "keyword", "question": "commercial paper outstanding", "relevant": [["commercial paper outstanding"]], "answer": {"all": ["8\\.0|\\$8 billion"]}},
-    {"id": "k08", "category": "keyword", "question": "Google LLC search licensing arrangement", "relevant": [["Google LLC"]]},
-    {"id": "k09", "category": "keyword", "question": "VPN rule", "relevant": [["VPN"]], "answer": {"all": ["public network"]}},
-    {"id": "k10", "category": "keyword", "question": "iPhone 16e", "relevant": [["iPhone 16e"]]},
-    {"id": "k11", "category": "keyword", "question": "manufacturing purchase obligations", "relevant": [["$56.2 billion"]], "answer": {"all": ["56\\.2"]}},
-
-    {"id": "t01", "category": "table", "question": "Which reportable segment grew fastest in 2025, and by how much?", "relevant": [["178,353", "28,703", "33,696"]], "answer": {"all": ["Japan", "15"]}},
-    {"id": "t02", "category": "table", "question": "What were Mac and iPad net sales in 2025?", "relevant": [["33,708", "28,023"]], "answer": {"all": ["33[.,]7", "28[.,]0"]}},
-    {"id": "t03", "category": "table", "question": "What was the total gross margin percentage in 2025 compared with 2024?", "relevant": [["46.9", "46.2"]], "answer": {"all": ["46\\.9", "46\\.2"]}},
-    {"id": "t04", "category": "table", "question": "How much did Apple spend on research and development in 2025, 2024 and 2023?", "relevant": [["34,550", "31,370", "29,915"]], "answer": {"all": ["34[.,]5", "31[.,]3", "29[.,]9"]}},
-
-    {"id": "u01", "category": "unanswerable", "question": "What is Apple's parental leave policy for employees?", "relevant": [], "answer": {"refuse": true}},
-    {"id": "u02", "category": "unanswerable", "question": "Who is the CEO of Microsoft?", "relevant": [], "answer": {"refuse": true}},
-    {"id": "u03", "category": "unanswerable", "question": "What is the office dress code?", "relevant": [], "answer": {"refuse": true}},
-    {"id": "u04", "category": "unanswerable", "question": "How many vacation days do new hires get?", "relevant": [], "answer": {"refuse": true}}
+    {
+      "id": "s01",
+      "category": "semantic",
+      "question": "What risks does Apple face from relying on outsourcing partners and single-source suppliers?",
+      "relevant": [
+        [
+          "single-source"
+        ],
+        [
+          "outsourcing partners located primarily"
+        ]
+      ]
+    },
+    {
+      "id": "s02",
+      "category": "semantic",
+      "question": "Why did Greater China net sales decline in 2025?",
+      "relevant": [
+        [
+          "Greater China net sales decreased"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "iPhone"
+        ]
+      }
+    },
+    {
+      "id": "s03",
+      "category": "semantic",
+      "question": "How did U.S. tariffs affect Apple in fiscal 2025?",
+      "relevant": [
+        [
+          "new U.S. Tariffs were announced"
+        ],
+        [
+          "tariff costs"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "tariff"
+        ]
+      }
+    },
+    {
+      "id": "s04",
+      "category": "semantic",
+      "question": "Why did the Services gross margin percentage go up?",
+      "relevant": [
+        [
+          "Services gross margin percentage increased"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "mix of services"
+        ]
+      }
+    },
+    {
+      "id": "s05",
+      "category": "semantic",
+      "question": "How much stock did Apple buy back and how much did it return in dividends during 2025?",
+      "relevant": [
+        [
+          "repurchased $89.3 billion"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "89\\.3",
+          "15\\.4"
+        ]
+      }
+    },
+    {
+      "id": "s06",
+      "category": "semantic",
+      "question": "What drove the sales increase in Japan?",
+      "relevant": [
+        [
+          "Japan net sales increased"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "iPhone",
+          "Services",
+          "iPad"
+        ]
+      }
+    },
+    {
+      "id": "s07",
+      "category": "semantic",
+      "question": "How much cash and marketable securities does the company hold?",
+      "relevant": [
+        [
+          "$132.4 billion"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "132\\.4"
+        ]
+      }
+    },
+    {
+      "id": "s08",
+      "category": "semantic",
+      "question": "Why was the effective tax rate below the statutory rate?",
+      "relevant": [
+        [
+          "lower than the statutory federal income tax rate"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "foreign earnings"
+        ]
+      }
+    },
+    {
+      "id": "s09",
+      "category": "semantic",
+      "question": "What could happen if hackers break into the company's systems?",
+      "relevant": [
+        [
+          "ransomware"
+        ],
+        [
+          "unauthorized access"
+        ]
+      ]
+    },
+    {
+      "id": "s10",
+      "category": "semantic",
+      "question": "How does a strong dollar hurt the company's results?",
+      "relevant": [
+        [
+          "U.S. dollar value of the Company"
+        ]
+      ]
+    },
+    {
+      "id": "s11",
+      "category": "semantic",
+      "question": "Does Apple depend on mobile operators to sell its phones?",
+      "relevant": [
+        [
+          "cellular network carriers and other resellers"
+        ]
+      ]
+    },
+    {
+      "id": "s12",
+      "category": "semantic",
+      "question": "What is the risk if important employees leave?",
+      "relevant": [
+        [
+          "highly skilled employees, including key personnel"
+        ]
+      ]
+    },
+    {
+      "id": "s13",
+      "category": "semantic",
+      "question": "How could natural disasters or a changing climate disrupt operations?",
+      "relevant": [
+        [
+          "Global climate change"
+        ],
+        [
+          "earthquakes"
+        ]
+      ]
+    },
+    {
+      "id": "s14",
+      "category": "semantic",
+      "question": "How many days a week can staff work from home?",
+      "relevant": [
+        [
+          "three days per week"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "three|3"
+        ]
+      }
+    },
+    {
+      "id": "s15",
+      "category": "semantic",
+      "question": "What allowance do I get for home office furniture?",
+      "relevant": [
+        [
+          "500 dollars"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "500"
+        ]
+      }
+    },
+    {
+      "id": "s16",
+      "category": "semantic",
+      "question": "What made research and development spending grow?",
+      "relevant": [
+        [
+          "growth in R&D expense"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "headcount"
+        ]
+      }
+    },
+    {
+      "id": "s17",
+      "category": "semantic",
+      "question": "Which new products were announced in the fourth quarter?",
+      "relevant": [
+        [
+          "iPhone 17 Pro Max"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "iPhone 17",
+          "AirPods Pro 3"
+        ]
+      }
+    },
+    {
+      "id": "k01",
+      "category": "keyword",
+      "question": "ASU 2025-06 effective date",
+      "relevant": [
+        [
+          "ASU 2025-06 will be effective"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "2029"
+        ]
+      }
+    },
+    {
+      "id": "k02",
+      "category": "keyword",
+      "question": "Section 232 investigation",
+      "relevant": [
+        [
+          "Section 232"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "semiconductor"
+        ]
+      }
+    },
+    {
+      "id": "k03",
+      "category": "keyword",
+      "question": "DMA compliance changes",
+      "relevant": [
+        [
+          "Digital Markets Act"
+        ]
+      ]
+    },
+    {
+      "id": "k04",
+      "category": "keyword",
+      "question": "TCJA deemed repatriation tax payable balance",
+      "relevant": [
+        [
+          "deemed repatriation tax payable"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "8\\.8"
+        ]
+      }
+    },
+    {
+      "id": "k05",
+      "category": "keyword",
+      "question": "When will ASU 2023-09 be adopted?",
+      "relevant": [
+        [
+          "will adopt ASU 2023-09"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "2026"
+        ]
+      }
+    },
+    {
+      "id": "k06",
+      "category": "keyword",
+      "question": "State Aid Decision impact",
+      "relevant": [
+        [
+          "State Aid Decision"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "10\\.7"
+        ]
+      }
+    },
+    {
+      "id": "k07",
+      "category": "keyword",
+      "question": "commercial paper outstanding",
+      "relevant": [
+        [
+          "commercial paper outstanding"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "8\\.0|\\$8 billion"
+        ]
+      }
+    },
+    {
+      "id": "k08",
+      "category": "keyword",
+      "question": "Google LLC search licensing arrangement",
+      "relevant": [
+        [
+          "Google LLC"
+        ]
+      ]
+    },
+    {
+      "id": "k09",
+      "category": "keyword",
+      "question": "VPN rule",
+      "relevant": [
+        [
+          "VPN"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "public network"
+        ]
+      }
+    },
+    {
+      "id": "k10",
+      "category": "keyword",
+      "question": "iPhone 16e",
+      "relevant": [
+        [
+          "iPhone 16e"
+        ]
+      ]
+    },
+    {
+      "id": "k11",
+      "category": "keyword",
+      "question": "manufacturing purchase obligations",
+      "relevant": [
+        [
+          "$56.2 billion"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "56\\.2"
+        ]
+      }
+    },
+    {
+      "id": "t01",
+      "category": "table",
+      "question": "Which reportable segment grew fastest in 2025, and by how much?",
+      "relevant": [
+        [
+          "178,353",
+          "28,703",
+          "33,696"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "Japan",
+          "15"
+        ]
+      }
+    },
+    {
+      "id": "t02",
+      "category": "table",
+      "question": "What were Mac and iPad net sales in 2025?",
+      "relevant": [
+        [
+          "33,708",
+          "28,023"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "33[.,]7",
+          "28[.,]0"
+        ]
+      }
+    },
+    {
+      "id": "t03",
+      "category": "table",
+      "question": "What was the total gross margin percentage in 2025 compared with 2024?",
+      "relevant": [
+        [
+          "46.9",
+          "46.2"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "46\\.9",
+          "46\\.2"
+        ]
+      }
+    },
+    {
+      "id": "t04",
+      "category": "table",
+      "question": "How much did Apple spend on research and development in 2025, 2024 and 2023?",
+      "relevant": [
+        [
+          "34,550",
+          "31,370",
+          "29,915"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "34[.,]5",
+          "31[.,]3",
+          "29[.,]9"
+        ]
+      }
+    },
+    {
+      "id": "c01",
+      "category": "calculation",
+      "question": "By how much did total net sales grow from 2024 to 2025, in dollars?",
+      "relevant": [
+        [
+          "416,161",
+          "391,035"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "25[,.]?126|25\\.1 ?billion"
+        ]
+      }
+    },
+    {
+      "id": "c02",
+      "category": "calculation",
+      "question": "What share of total 2025 net sales came from Services?",
+      "relevant": [
+        [
+          "109,158",
+          "416,161"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "(?<![\\d.])26(\\.2\\d*)? ?(%|percent)"
+        ]
+      }
+    },
+    {
+      "id": "c03",
+      "category": "calculation",
+      "question": "What were Mac and iPad net sales combined in 2025?",
+      "relevant": [
+        [
+          "33,708",
+          "28,023"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "61[,.]?731|61\\.7 ?billion"
+        ]
+      }
+    },
+    {
+      "id": "c04",
+      "category": "calculation",
+      "question": "By what percentage did total gross margin increase from 2024 to 2025?",
+      "relevant": [
+        [
+          "195,201",
+          "180,683"
+        ]
+      ],
+      "answer": {
+        "all": [
+          "(?<![\\d.])8(\\.0\\d*)? ?(%|percent)"
+        ]
+      }
+    },
+    {
+      "id": "u01",
+      "category": "unanswerable",
+      "question": "What is Apple's parental leave policy for employees?",
+      "relevant": [],
+      "answer": {
+        "refuse": true
+      }
+    },
+    {
+      "id": "u02",
+      "category": "unanswerable",
+      "question": "Who is the CEO of Microsoft?",
+      "relevant": [],
+      "answer": {
+        "refuse": true
+      }
+    },
+    {
+      "id": "u03",
+      "category": "unanswerable",
+      "question": "What is the office dress code?",
+      "relevant": [],
+      "answer": {
+        "refuse": true
+      }
+    },
+    {
+      "id": "u04",
+      "category": "unanswerable",
+      "question": "How many vacation days do new hires get?",
+      "relevant": [],
+      "answer": {
+        "refuse": true
+      }
+    }
   ]
 }

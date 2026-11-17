@@ -1,4 +1,4 @@
-> **Note:** This is the original design essay, kept for background. Some details (Streamlit UI, LlamaIndex parsing) describe v1. The [README](../README.md) is the current reference.
+> **Note:** This is the original design essay, kept for background. Some details (the Streamlit UI, since removed, and LlamaIndex parsing) describe v1. The [README](../README.md) is the current reference.
 
 # Building a Production RAG System: The Real Story
 

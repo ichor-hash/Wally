@@ -1,0 +1,117 @@
+$ python evals/run_evals.py --answers
+
+Retrieval: 40 questions, top 5
+
+  configuration              passed   hit@1   hit@5    MRR  rejects   latency
+  baseline-v2                33/40      50%     89%   0.65      25%      23 ms
+  dense                      32/40      58%     86%   0.70      25%      69 ms
+  keyword                    34/40      58%     89%   0.70      50%      49 ms
+  hybrid                     35/40      69%     94%   0.79      25%      53 ms
+  hybrid+rerank              39/40      83%     97%   0.87     100%     497 ms
+  hybrid+context             36/40      75%     97%   0.84      25%      22 ms
+  hybrid+context+rerank *    39/40      83%     97%   0.87     100%     485 ms
+  * default
+
+Answers: baseline-v2  (v2 pipeline: fixed chunks, dense search, no checks)
+  PASS  s02  Why did Greater China net sales decline in 2025?                  
+  PASS  s03  How did U.S. tariffs affect Apple in fiscal 2025?                 
+  PASS  s04  Why did the Services gross margin percentage go up?               
+  PASS  s05  How much stock did Apple buy back and how much did it return in   
+  PASS  s06  What drove the sales increase in Japan?                           
+  PASS  s07  How much cash and marketable securities does the company hold?    
+  PASS  s08  Why was the effective tax rate below the statutory rate?          
+  PASS  s14  How many days a week can staff work from home?                    
+  PASS  s15  What allowance do I get for home office furniture?                
+  PASS  s16  What made research and development spending grow?                 
+  FAIL  s17  Which new products were announced in the fourth quarter?            <- answer is missing: AirPods Pro 3
+  PASS  k01  ASU 2025-06 effective date                                        
+  PASS  k02  Section 232 investigation                                         
+  PASS  k04  TCJA deemed repatriation tax payable balance                      
+  PASS  k05  When will ASU 2023-09 be adopted?                                 
+  PASS  k06  State Aid Decision impact                                         
+  PASS  k07  commercial paper outstanding                                      
+  PASS  k09  VPN rule                                                          
+  PASS  k11  manufacturing purchase obligations                                
+  FAIL  t01  Which reportable segment grew fastest in 2025, and by how much?     <- answer is missing: 15
+  PASS  t02  What were Mac and iPad net sales in 2025?                         
+  PASS  t03  What was the total gross margin percentage in 2025 compared with  
+  FAIL  t04  How much did Apple spend on research and development in 2025, 20    <- answer is missing: 34[.,]5, 31[.,]3, 29[.,]9
+  PASS  c01  By how much did total net sales grow from 2024 to 2025, in dolla  
+  PASS  c02  What share of total 2025 net sales came from Services?            
+  PASS  c03  What were Mac and iPad net sales combined in 2025?                
+  PASS  c04  By what percentage did total gross margin increase from 2024 to   
+  PASS  u01  What is Apple's parental leave policy for employees?              
+  PASS  u02  Who is the CEO of Microsoft?                                      
+  PASS  u03  What is the office dress code?                                    
+  PASS  u04  How many vacation days do new hires get?                          
+  => 28/31 correct, 1128 tokens and 1.0 LLM calls per question
+
+Answers: v3  (v3: hybrid + context + rerank, corrective search, verification)
+  PASS  s02  Why did Greater China net sales decline in 2025?                  verified 1/1
+  PASS  s03  How did U.S. tariffs affect Apple in fiscal 2025?                 verified 2/2
+  PASS  s04  Why did the Services gross margin percentage go up?               verified 1/1
+  PASS  s05  How much stock did Apple buy back and how much did it return in   verified 2/2, revised
+  PASS  s06  What drove the sales increase in Japan?                           verified 1/1
+  PASS  s07  How much cash and marketable securities does the company hold?    verified 1/1
+  PASS  s08  Why was the effective tax rate below the statutory rate?          verified 2/2
+  PASS  s14  How many days a week can staff work from home?                    verified 1/1
+  PASS  s15  What allowance do I get for home office furniture?                verified 1/1
+  PASS  s16  What made research and development spending grow?                 verified 1/1
+  PASS  s17  Which new products were announced in the fourth quarter?          verified 1/1
+  PASS  k01  ASU 2025-06 effective date                                        verified 1/1, revised
+  PASS  k02  Section 232 investigation                                         verified 2/2, revised
+  PASS  k04  TCJA deemed repatriation tax payable balance                      verified 1/1
+  PASS  k05  When will ASU 2023-09 be adopted?                                 verified 1/1, revised
+  PASS  k06  State Aid Decision impact                                         verified 1/1
+  PASS  k07  commercial paper outstanding                                      verified 1/1
+  PASS  k09  VPN rule                                                          verified 1/1
+  PASS  k11  manufacturing purchase obligations                                verified 2/3
+  PASS  t01  Which reportable segment grew fastest in 2025, and by how much?   verified 0/1, revised
+  PASS  t02  What were Mac and iPad net sales in 2025?                         verified 2/2
+  PASS  t03  What was the total gross margin percentage in 2025 compared with  verified 1/1
+  PASS  t04  How much did Apple spend on research and development in 2025, 20  verified 1/1
+  PASS  c01  By how much did total net sales grow from 2024 to 2025, in dolla  verified 1/1
+  PASS  c02  What share of total 2025 net sales came from Services?            verified 2/2
+  PASS  c03  What were Mac and iPad net sales combined in 2025?                verified 1/1
+  PASS  c04  By what percentage did total gross margin increase from 2024 to   verified 1/1
+  PASS  u01  What is Apple's parental leave policy for employees?              
+  PASS  u02  Who is the CEO of Microsoft?                                      re-searched
+  PASS  u03  What is the office dress code?                                    re-searched
+  PASS  u04  How many vacation days do new hires get?                          re-searched
+  => 31/31 correct, 33/35 claims verified, 1749 tokens and 2.35 LLM calls per question
+
+Answers: v3+agent  (v3 + agent tools (calculate, search_documents))
+  PASS  s02  Why did Greater China net sales decline in 2025?                  verified 1/1
+  PASS  s03  How did U.S. tariffs affect Apple in fiscal 2025?                 verified 2/2
+  PASS  s04  Why did the Services gross margin percentage go up?               verified 1/1
+  PASS  s05  How much stock did Apple buy back and how much did it return in   verified 2/2
+  PASS  s06  What drove the sales increase in Japan?                           verified 1/1
+  PASS  s07  How much cash and marketable securities does the company hold?    verified 1/1
+  PASS  s08  Why was the effective tax rate below the statutory rate?          verified 2/2, revised
+  PASS  s14  How many days a week can staff work from home?                    verified 1/1
+  PASS  s15  What allowance do I get for home office furniture?                verified 1/1
+  PASS  s16  What made research and development spending grow?                 verified 1/1
+  PASS  s17  Which new products were announced in the fourth quarter?          verified 1/1, revised
+  PASS  k01  ASU 2025-06 effective date                                        verified 1/1, revised
+  PASS  k02  Section 232 investigation                                         verified 1/1
+  PASS  k04  TCJA deemed repatriation tax payable balance                      verified 0/1, revised
+  PASS  k05  When will ASU 2023-09 be adopted?                                 verified 1/1, revised
+  PASS  k06  State Aid Decision impact                                         verified 1/1
+  PASS  k07  commercial paper outstanding                                      verified 1/1
+  PASS  k09  VPN rule                                                          verified 1/1
+  PASS  k11  manufacturing purchase obligations                                verified 2/2
+  PASS  t01  Which reportable segment grew fastest in 2025, and by how much?   2 tool call(s), verified 2/2
+  PASS  t02  What were Mac and iPad net sales in 2025?                         verified 2/2
+  PASS  t03  What was the total gross margin percentage in 2025 compared with  verified 1/1
+  PASS  t04  How much did Apple spend on research and development in 2025, 20  verified 1/1
+  PASS  c01  By how much did total net sales grow from 2024 to 2025, in dolla  1 tool call(s), verified 1/1
+  PASS  c02  What share of total 2025 net sales came from Services?            1 tool call(s), verified 1/1
+  PASS  c03  What were Mac and iPad net sales combined in 2025?                1 tool call(s), verified 1/1
+  PASS  c04  By what percentage did total gross margin increase from 2024 to   1 tool call(s), verified 1/1
+  PASS  u01  What is Apple's parental leave policy for employees?              
+  PASS  u02  Who is the CEO of Microsoft?                                      re-searched
+  PASS  u03  What is the office dress code?                                    re-searched
+  PASS  u04  How many vacation days do new hires get?                          re-searched
+  => 31/31 correct, 32/33 claims verified, 2242 tokens and 2.55 LLM calls per question
+
+Regression check: PASS

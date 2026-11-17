@@ -10,6 +10,9 @@ export interface Settings {
   topK: number;
   mode: RetrievalMode;
   visuals: boolean;
+  agent: boolean;
+  verify: boolean;
+  correct: boolean;
 }
 
 const MODES: { id: RetrievalMode; label: string; hint: string }[] = [
@@ -55,6 +58,14 @@ export function SettingsView({ settings, onChange, health, rerankerWarming }: Pr
         ["Reranker", `${rerankModel}, ${health.reranker_loaded ? "loaded" : "loads on first use"}`],
         ["Chunking", `${health.chunk_strategy === "structure" ? "Structure-aware" : "Fixed window"}, ${health.chunk_size} characters, ${health.chunk_overlap} overlap`],
         ["Retrieval", health.similarity_metric],
+        [
+          "Contextual retrieval",
+          health.contextual_retrieval === "off"
+            ? "Off"
+            : health.contextual_retrieval === "llm"
+              ? "Document title, section and an LLM summary indexed with each chunk"
+              : "Document title and section indexed with each chunk",
+        ],
         ["Token price", price?.configured ? `${formatUsd(price.input_per_m)} in / ${formatUsd(price.output_per_m)} out per million` : "Not set (free tier or local model)"],
         ["Answer cache", cache?.enabled ? `${cache.entries} of ${cache.max_entries} entries, kept ${Math.round(cache.ttl_seconds / 60)} min` : "Off"],
         ["Budgets", `${health.max_context_chars.toLocaleString()} context characters, ${health.max_output_tokens} output tokens`],
@@ -123,6 +134,42 @@ export function SettingsView({ settings, onChange, health, rerankerWarming }: Pr
                 />
                 <span className="tabular w-5 text-right text-[14px] text-ink">{settings.topK}</span>
               </div>
+            }
+          />
+        </div>
+      </section>
+
+      <section className="mt-16">
+        <SectionTitle>Answer quality</SectionTitle>
+        <div className="border-t border-line-soft">
+          <Row
+            title="Verify answers"
+            description="After writing, check every cited claim against only the chunks it cites. A claim that is not supported triggers one rewrite, which is checked again. One extra model call, about half a second."
+            control={<Toggle label="Verify answers" checked={settings.verify} onChange={(v) => onChange({ ...settings, verify: v })} />}
+          />
+          <Row
+            title="Re-search weak results"
+            description="When the reranker finds only weak evidence, rewrite the question in the documents' own wording and search again. Costs a short model call, only on weak searches."
+            control={<Toggle label="Re-search weak results" checked={settings.correct} onChange={(v) => onChange({ ...settings, correct: v })} />}
+          />
+          <Row
+            title="Agent tools"
+            description={
+              health && !health.agent_available ? (
+                <>Unavailable: the configured model provider does not support tool calls.</>
+              ) : (
+                <>
+                  Let the model call a calculator for every sum, share or percentage change, and search the documents again when the first chunks are not
+                  enough. Each tool step is shown under the answer. Two to three model calls per question instead of one.
+                </>
+              )
+            }
+            control={
+              <Toggle
+                label="Agent tools"
+                checked={settings.agent && (health?.agent_available ?? true)}
+                onChange={(v) => onChange({ ...settings, agent: v })}
+              />
             }
           />
         </div>

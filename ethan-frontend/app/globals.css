@@ -37,6 +37,8 @@
   --stage-2: #a3a3a3;
   --stage-3: #6e6e6e;
   --stage-4: #1a1a1a;
+  --stage-rewrite: #c9b98f;
+  --stage-verify: #2e7d4f;
 
   --mark: #f1efe6;
 }
@@ -64,6 +66,8 @@
   --color-stage-2: var(--stage-2);
   --color-stage-3: var(--stage-3);
   --color-stage-4: var(--stage-4);
+  --color-stage-rewrite: var(--stage-rewrite);
+  --color-stage-verify: var(--stage-verify);
   --color-mark: var(--mark);
 }
 

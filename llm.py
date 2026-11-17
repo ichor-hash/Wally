@@ -97,15 +97,43 @@ class LLMProvider(ABC):
         yield "token", text
         yield "usage", usage
 
+    def chat_with_tools(
+        self,
+        messages: List[dict],
+        tools: List[dict],
+        tool_choice: str = "auto",
+        temperature: float = 0.2,
+        max_tokens: int = 1024,
+    ) -> Tuple[Dict[str, Any], Dict[str, int]]:
+        """
+        One chat turn with OpenAI-style function tools.
+        Returns (assistant message dict, usage); the message has `tool_calls` when the model calls tools.
+        """
+        raise NotImplementedError(f"{self.provider_name} does not support tool calling")
+
+
+def _message_dict(content: Optional[str], tool_calls) -> Dict[str, Any]:
+    """Normalise an assistant message (SDK object or JSON) into a dict we can send back."""
+    message: Dict[str, Any] = {"role": "assistant", "content": content or ""}
+    calls = []
+    for tc in tool_calls or []:
+        fn = tc["function"] if isinstance(tc, dict) else tc.function
+        name = fn["name"] if isinstance(fn, dict) else fn.name
+        args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
+        calls.append({"id": tc["id"] if isinstance(tc, dict) else tc.id, "type": "function", "function": {"name": name, "arguments": args or "{}"}})
+    if calls:
+        message["tool_calls"] = calls
+    return message
+
 
 class GroqLLM(LLMProvider):
     """
     LLM via Groq API.
     Free tier, very fast inference.
 
-    Models available (October 2026):
-    - openai/gpt-oss-20b (recommended, free, 1000 T/sec)
-    - openai/gpt-oss-120b (free, 500 T/sec)
+    Models (November 2026):
+    - openai/gpt-oss-120b (default; the model the evaluation was graded with)
+    - openai/gpt-oss-20b (faster and cheaper)
     - llama-3.1-8b-instant (Enterprise only)
     - llama-3.3-70b-versatile (Enterprise only)
 
@@ -114,7 +142,7 @@ class GroqLLM(LLMProvider):
 
     provider_name = "Groq"
 
-    def __init__(self, model: str = "openai/gpt-oss-20b"):
+    def __init__(self, model: str = "openai/gpt-oss-120b"):
         super().__init__()
         if groq is None:
             raise ImportError("groq not installed. Run: pip install groq")
@@ -185,6 +213,22 @@ class GroqLLM(LLMProvider):
             elif getattr(chunk, "x_groq", None) and getattr(chunk.x_groq, "usage", None):
                 usage = _usage_dict(chunk.x_groq.usage)
         yield "usage", usage
+
+
+    def chat_with_tools(self, messages, tools, tool_choice="auto", temperature=0.2, max_tokens=1024):
+        raw = self.client.chat.completions.with_raw_response.create(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra_body=self._extra(None) or None,
+        )
+        self._capture_limits(raw.headers)
+        response = raw.parse()
+        msg = response.choices[0].message
+        return _message_dict(msg.content, msg.tool_calls), _usage_dict(response.usage)
 
 
 class OpenRouterLLM(LLMProvider):
@@ -287,6 +331,25 @@ class OpenRouterLLM(LLMProvider):
         yield "usage", usage
 
 
+    def chat_with_tools(self, messages, tools, tool_choice="auto", temperature=0.2, max_tokens=1024):
+        import requests
+
+        response = requests.post(
+            self.URL,
+            headers=self._headers(),
+            json={
+                "model": self.model, "messages": messages, "tools": tools, "tool_choice": tool_choice,
+                "temperature": temperature, "max_tokens": max_tokens,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        self._capture_limits(response.headers)
+        data = response.json()
+        msg = data["choices"][0]["message"]
+        return _message_dict(msg.get("content"), msg.get("tool_calls")), _usage_dict(data.get("usage"))
+
+
 class OpenAICompatibleLLM(OpenRouterLLM):
     """
     Any OpenAI-compatible chat-completions endpoint, typically a local model server.
@@ -310,7 +373,7 @@ class OpenAICompatibleLLM(OpenRouterLLM):
         self.provider_name = "Ollama" if ":11434" in base_url else "OpenAI-compatible"
 
 
-DEFAULT_MODELS = {"groq": "openai/gpt-oss-20b", "openrouter": "google/gemma-2-9b-it", "openai_compatible": "llama3.2:3b"}
+DEFAULT_MODELS = {"groq": "openai/gpt-oss-120b", "openrouter": "google/gemma-2-9b-it", "openai_compatible": "llama3.2:3b"}
 
 
 def llm_from_env() -> LLMProvider:

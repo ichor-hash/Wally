@@ -41,6 +41,45 @@ def _is_heading(block: str) -> bool:
     return not re.search(r"[.!?:;,]$", block)
 
 
+def _inline_heading(line: str, previous: str) -> bool:
+    """
+    A heading inside a block of text, as PDFs produce: no blank line around it.
+    Short, starts with a capital or a number, no sentence punctuation at the end,
+    and the line before it (if any) finished a sentence. Wrapped sentence lines
+    rarely pass all four tests.
+    """
+    line = line.strip()
+    if not line or len(line) > 80 or not _is_heading(line) or _is_row(line):
+        return False
+    if not (line[0].isupper() or line[0].isdigit() or line.startswith("#")):
+        return False
+    if len(line.split()) > 10:
+        return False
+    return not previous or bool(re.search(r"[.!?:;]$|^#", previous.strip()))
+
+
+def _split_inline_headings(block: str) -> List[str]:
+    """Split a block wherever a heading line sits inside it, keeping the heading as its own block."""
+    lines = block.split("\n")
+    if len(lines) < 2:
+        return [block]
+    out: List[str] = []
+    current: List[str] = []
+    for i, line in enumerate(lines):
+        previous = lines[i - 1] if i else ""
+        has_body_after = i + 1 < len(lines)
+        if has_body_after and _inline_heading(line, previous):
+            if current:
+                out.append("\n".join(current).strip())
+            out.append(line.strip())
+            current = []
+        else:
+            current.append(line)
+    if current:
+        out.append("\n".join(current).strip())
+    return [b for b in out if b]
+
+
 class DocumentLoader:
     """Loads PDF and text files and chunks them. Supports .pdf, .txt, .md"""
 
@@ -67,6 +106,17 @@ class DocumentLoader:
             raise FileNotFoundError(f"PDF file not found: {file_path}")
         pages = (page.extract_text() for page in PdfReader(str(path)).pages)
         return "\n\n".join(text for text in pages if text)
+
+    def file_title(self, file_path: str) -> str:
+        """The document's own title when the file declares one (PDF metadata), else ''."""
+        if Path(file_path).suffix.lower() != ".pdf" or PdfReader is None:
+            return ""
+        try:
+            meta = PdfReader(str(file_path)).metadata
+            title = (meta.title if meta else "") or ""
+            return title.strip() if len(title.strip()) >= 4 and not title.lower().startswith(("microsoft word", "untitled")) else ""
+        except Exception:
+            return ""
 
     def load_file(self, file_path: str) -> str:
         suffix = Path(file_path).suffix.lower()
@@ -109,7 +159,12 @@ class DocumentLoader:
 
     def _blocks(self, text: str) -> List[Dict[str, Any]]:
         """Split into paragraphs, merging table rows (and their caption) into single blocks."""
-        raw = [b.strip() for b in re.split(r"\n\s*\n", text.replace("\r", "")) if b.strip()]
+        raw = []
+        for b in re.split(r"\n\s*\n", text.replace("\r", "")):
+            b = b.strip()
+            if b:
+                # Tables keep their rows together; prose blocks may hide headings (PDFs)
+                raw.extend([b] if _is_row(b) else _split_inline_headings(b))
         blocks: List[Dict[str, Any]] = []
         i = 0
         while i < len(raw):
@@ -204,6 +259,8 @@ class DocumentLoader:
             if not c["text"].strip():
                 continue
             prev = merged[-1] if merged else None
+            # A very short section (under MIN_CHUNK_CHARS) joins its neighbour; its heading
+            # text stays in the chunk, so it is still found by keyword and meaning search.
             small = prev and min(len(prev["text"]), len(c["text"])) < MIN_CHUNK_CHARS
             if small and prev["kind"] == c["kind"] == "text" and len(prev["text"]) + len(c["text"]) <= self.chunk_size * 1.5:
                 prev["text"] += "\n\n" + c["text"]
