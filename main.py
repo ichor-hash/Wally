@@ -19,9 +19,9 @@ load_dotenv()
 
 from answering import AnswerConfig, AnswerOptions, Answerer, EMPTY_ANSWER
 from contextual import MODES as CONTEXT_MODES, build_contexts, summarize_document, with_context
-from costs import AnswerCache, Pricing
+from costs import AnswerCache, Pricing, normalize_question
 from data_loader import DocumentLoader
-from llm import llm_from_env
+from llm import get_llm_provider, llm_from_env
 from pipeline import Retriever
 from reranker import Reranker
 from telemetry import Telemetry, RateLimiter
@@ -63,6 +63,8 @@ MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "1024"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 ANSWER_CACHE_TTL = float(os.getenv("ANSWER_CACHE_TTL", "3600"))
 ANSWER_CACHE_SIZE = int(os.getenv("ANSWER_CACHE_SIZE", "256"))
+CONTEXT_PRUNE_RATIO = float(os.getenv("CONTEXT_PRUNE_RATIO", "0.01"))  # 0 sends every retrieved chunk
+CHECK_MODEL = os.getenv("CHECK_MODEL", "").strip()  # cheaper model for fact-checks and query rewrites
 # Deployment (docs/HOSTING.md)
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 ALLOW_DIRECTORY_INGEST = env_bool("ALLOW_DIRECTORY_INGEST")
@@ -105,6 +107,21 @@ except Exception as e:  # missing key, missing package
     llm, llm_error = None, str(e)
     log.warning("LLM unavailable: %s", e)
 
+# Fact-checks and query rewrites are short structured tasks; CHECK_MODEL lets a
+# smaller model do them (same provider and key). Priced separately when
+# CHECK_PRICE_* is set, else at the main model's price.
+check_llm = None
+check_pricing = pricing
+if llm is not None and CHECK_MODEL and CHECK_MODEL != llm.model:
+    try:
+        check_llm = get_llm_provider(os.getenv("LLM_PROVIDER", "groq").strip().lower(), model=CHECK_MODEL)
+        check_pricing = Pricing(
+            float(os.getenv("CHECK_PRICE_INPUT_PER_M", pricing.input_per_m)),
+            float(os.getenv("CHECK_PRICE_OUTPUT_PER_M", pricing.output_per_m)),
+        )
+    except Exception as e:
+        log.warning("CHECK_MODEL unavailable, using the main model for checks: %s", e)
+
 try:
     VISUALS_PROMPT = (ROOT / "prompts" / "openui.txt").read_text(encoding="utf-8").strip()
 except FileNotFoundError:
@@ -116,8 +133,11 @@ answerer = Answerer(
         assistant_name=ASSISTANT_NAME, company_name=COMPANY_NAME, company_profile=COMPANY_PROFILE,
         visuals_prompt=VISUALS_PROMPT, max_context_chars=MAX_CONTEXT_CHARS, max_output_tokens=MAX_OUTPUT_TOKENS,
         temperature=LLM_TEMPERATURE, gap_threshold=GAP_THRESHOLD, revise=REVISE_ANSWERS,
+        prune_ratio=CONTEXT_PRUNE_RATIO,
     ),
     pricing,
+    check_llm=check_llm,
+    check_pricing=check_pricing,
 )
 
 
@@ -202,10 +222,10 @@ def options_for(req: SearchRequest) -> AnswerOptions:
 
 def cache_key_for(req: SearchRequest, opts: AnswerOptions) -> str:
     return AnswerCache.key(
-        q=" ".join(req.query.lower().split()), k=opts.top_k, rerank=opts.rerank, mode=opts.mode or RETRIEVAL_MODE,
+        q=normalize_question(req.query), k=opts.top_k, rerank=opts.rerank, mode=opts.mode or RETRIEVAL_MODE,
         visuals=opts.visuals, agent=opts.agent, verify=opts.verify, correct=opts.correct,
         history=[(t["role"], t["content"]) for t in opts.history[-6:]],
-        index=rag_db.version, model=llm.model if llm else None,
+        index=rag_db.version, model=llm.model if llm else None, check=check_llm.model if check_llm else None,
     )
 
 
@@ -215,7 +235,7 @@ def cached_result(entry: Dict[str, Any], total_time: float) -> Dict[str, Any]:
         **{k: 0.0 for k in ("embedding_time", "search_time", "retrieval_time", "rerank_time", "rewrite_time", "llm_time", "verify_time")},
         "total_time": round(total_time, 3), "ttft": round(total_time, 3),
         "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "llm_calls": 0, "cost_usd": 0.0,
-        "candidates": 0, "mode": entry["metrics"]["mode"], "agent_steps": entry["metrics"].get("agent_steps", 0),
+        "candidates": 0, "chunks_pruned": 0, "mode": entry["metrics"]["mode"], "agent_steps": entry["metrics"].get("agent_steps", 0),
         "cached": True, "tokens_saved": entry["metrics"]["total_tokens"], "cost_saved_usd": entry["metrics"]["cost_usd"],
     }
     return {**entry, "metrics": metrics}
@@ -255,6 +275,8 @@ def health():
         "llm_model": llm.model if llm else None,
         "llm_provider": llm.provider_name if llm else None,
         "llm_error": llm_error,
+        "check_model": check_llm.model if check_llm else None,
+        "context_prune_ratio": CONTEXT_PRUNE_RATIO,
         "reranker_model": RERANK_MODEL,
         "reranker_loaded": reranker.loaded,
         "retrieval_mode": retriever.default_mode if rag_db.hybrid_available else "dense",

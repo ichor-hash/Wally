@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from costs import Pricing
-from pipeline import Retriever, trim_to_budget
+from pipeline import Retriever, prune_context, trim_to_budget
 from tools import AGENT_INSTRUCTIONS, TOOLS, CalculationError, calculate, format_number
 from verify import problems_for, revision_messages, verify_answer
 
@@ -63,6 +63,7 @@ class AnswerConfig:
     temperature: float = 0.2
     gap_threshold: float = 0.25
     revise: bool = True
+    prune_ratio: float = 0.01  # leave out chunks below 1% of the best rerank score (pipeline.prune_context)
 
 
 # ---------------------------------------------------------------- formatting
@@ -111,18 +112,31 @@ def tidy(text: str) -> str:
     return text.replace("\\%", "%")
 
 
-def add_usage(total: Dict[str, int], usage: Dict[str, int]):
-    for k in ("prompt_tokens", "completion_tokens"):
-        total[k] = total.get(k, 0) + (usage.get(k) or 0)
+def add_usage(total: Dict[str, Any], usage: Dict[str, int], pricing: Optional[Pricing] = None):
+    """Add one call's tokens, and its cost at that call's model price (the checks can use a cheaper model)."""
+    prompt, completion = usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0
+    total["prompt_tokens"] = total.get("prompt_tokens", 0) + prompt
+    total["completion_tokens"] = total.get("completion_tokens", 0) + completion
     total["calls"] = total.get("calls", 0) + 1
+    if pricing is not None:
+        total["cost"] = total.get("cost", 0.0) + pricing.cost(prompt, completion)
 
 
 class Answerer:
-    def __init__(self, retriever: Retriever, llm, config: AnswerConfig, pricing: Optional[Pricing] = None):
+    """
+    `check_llm` runs the fact-check and the corrective query rewrite. Both are
+    short, structured tasks, so a smaller, cheaper model can do them while
+    `llm` writes the answers (CHECK_MODEL, docs/COSTS.md). Defaults to `llm`.
+    """
+
+    def __init__(self, retriever: Retriever, llm, config: AnswerConfig, pricing: Optional[Pricing] = None,
+                 check_llm=None, check_pricing: Optional[Pricing] = None):
         self.retriever = retriever
         self.llm = llm
         self.config = config
         self.pricing = pricing or Pricing(0, 0)
+        self.check_llm = check_llm or llm
+        self.check_pricing = check_pricing or self.pricing
 
     # ---------------------------------------------------------------- prompt
     def build_messages(self, query: str, sources: List[Dict[str, Any]], history: List[Dict[str, str]],
@@ -154,8 +168,8 @@ class Answerer:
     # ---------------------------------------------------------------- steps
     def rewrite(self, query: str, usage: Dict[str, int]) -> str:
         try:
-            text, u = self.llm.chat_with_usage([{"role": "user", "content": REWRITE_PROMPT + query}], temperature=0.0, max_tokens=300)
-            add_usage(usage, u)
+            text, u = self.check_llm.chat_with_usage([{"role": "user", "content": REWRITE_PROMPT + query}], temperature=0.0, max_tokens=300)
+            add_usage(usage, u, self.check_pricing)
             return text.strip().strip('"').splitlines()[0][:300] if text.strip() else ""
         except Exception:
             return ""
@@ -170,7 +184,7 @@ class Answerer:
                 messages, TOOLS, tool_choice="none" if last else "auto",
                 temperature=self.config.temperature, max_tokens=self.config.max_output_tokens,
             )
-            add_usage(usage, u)
+            add_usage(usage, u, self.pricing)
             calls = message.get("tool_calls") or []
             if not calls:
                 yield "final", {"text": message.get("content") or ""}
@@ -191,7 +205,8 @@ class Answerer:
                         ok, result = False, f"Error: {e}"
                 elif name == "search_documents":
                     found = self.retriever.retrieve(str(args.get("query", ""))[:300], top_k=AGENT_SEARCH_K, rerank=opts.rerank, mode=opts.mode)
-                    for r in trim_to_budget(found["results"], self.config.max_context_chars // 2):
+                    found_results = prune_context(found["results"], self.config.prune_ratio) if opts.rerank else found["results"]
+                    for r in trim_to_budget(found_results, self.config.max_context_chars // 2):
                         if str(r["id"]) not in seen:
                             seen.add(str(r["id"]))
                             new_sources.append(format_source(r, len(sources) + len(new_sources) + 1))
@@ -219,7 +234,11 @@ class Answerer:
         retrieval = self.retriever.retrieve(query, top_k=opts.top_k, rerank=opts.rerank, mode=opts.mode, rewriter=rewriter)
         if retrieval["correction"]:
             times["rewrite_time"] = retrieval["correction"]["rewrite_time"]
-        sources = format_sources(trim_to_budget(retrieval["results"], self.config.max_context_chars))
+        results = retrieval["results"]
+        if opts.rerank:
+            results = prune_context(results, self.config.prune_ratio)
+        pruned = len(retrieval["results"]) - len(results)
+        sources = format_sources(trim_to_budget(results, self.config.max_context_chars))
         confidence = confidence_for(sources, opts.rerank, self.config.gap_threshold)
         yield "stage", {
             "stage": "retrieved", "mode": retrieval["mode"], "results_found": len(sources),
@@ -263,7 +282,7 @@ class Answerer:
                         yield "token", {"token": value}
                     elif kind == "usage":
                         stream_usage = value
-                add_usage(usage, stream_usage)
+                add_usage(usage, stream_usage, self.pricing)
             times["llm_time"] = time.perf_counter() - t0
             answer = tidy("".join(parts))
             if not answer.strip():
@@ -273,9 +292,9 @@ class Answerer:
             if opts.verify and answer != EMPTY_ANSWER:
                 yield "stage", {"stage": "verifying"}
                 t1 = time.perf_counter()
-                verification, u = verify_answer(self.llm, answer, sources, self.config.max_output_tokens)
+                verification, u = verify_answer(self.check_llm, answer, sources, self.config.max_output_tokens)
                 if u:
-                    add_usage(usage, u)
+                    add_usage(usage, u, self.check_pricing)
                 problems = problems_for(verification)
                 if problems and self.config.revise:
                     # Self-correction: rewrite once with the checker's findings, then check the rewrite
@@ -285,12 +304,12 @@ class Answerer:
                             revision_messages(messages, answer, problems),
                             temperature=self.config.temperature, max_tokens=self.config.max_output_tokens,
                         )
-                        add_usage(usage, u2)
+                        add_usage(usage, u2, self.pricing)
                         text = tidy(text)
                         if text.strip():
-                            second, u3 = verify_answer(self.llm, text, sources, self.config.max_output_tokens)
+                            second, u3 = verify_answer(self.check_llm, text, sources, self.config.max_output_tokens)
                             if u3:
-                                add_usage(usage, u3)
+                                add_usage(usage, u3, self.check_pricing)
                             revised = {
                                 "original": answer, "problems": problems,
                                 "before": {k: verification[k] for k in ("supported", "partial", "unsupported", "total", "score")},
@@ -318,8 +337,9 @@ class Answerer:
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
             "llm_calls": usage.get("calls", 0),
-            "cost_usd": round(self.pricing.cost(prompt_tokens, completion_tokens), 6),
+            "cost_usd": round(usage.get("cost", 0.0), 6),
             "candidates": retrieval["candidates"],
+            "chunks_pruned": pruned,
             "mode": retrieval["mode"],
             "agent_steps": len(steps),
             "cached": False,

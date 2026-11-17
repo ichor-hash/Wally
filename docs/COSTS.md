@@ -26,6 +26,28 @@ Two earlier savings still hold:
 - **Most of the prompt is the retrieved chunks.** The system prompt is a couple of hundred tokens, the question a dozen or so.
 - **`reasoning_effort=low`.** `gpt-oss` models reason before answering, and those hidden tokens are billed. In an earlier run on `gpt-oss-20b`, completion tokens fell from 224 to 78 per answer with no loss in accuracy. It also fixed a real failure: on the default effort, one answer spent its whole output budget on reasoning and came back empty.
 
+## Cutting it further
+
+Three savings that do not touch answer quality:
+
+**Near-irrelevant chunks are left out** (`CONTEXT_PRUNE_RATIO=0.01`). After reranking, a strong question usually has one or two chunks scoring near 1.0 and a tail scoring near 0. For example, `k06` scores 0.997, then 0.000 four times. Chunks below 1% of the best score are not sent, and the best two always are. When the best score is weak, everything is sent, because the reranker is unsure: in `s15` every chunk scores 0.000 and the first one is still the right one.
+
+Measured on the 31 graded questions:
+
+| | Before | Pruned |
+|---|---|---|
+| Context characters sent (all 40 questions, retrieval only) | 100% | 81% |
+| Chunks a question needs that were dropped | none | none |
+| Prompt tokens per answer (v3, live run) | 1,412 | 1,186 (−16%) |
+| Cost per answer at $0.15 / $0.60 per M | $0.000384 | $0.000343 (−11%) |
+| Answers correct | 30/30 | 30/30 |
+
+The live run used a 2% cutoff; the default is 1%, which keeps a borderline chunk (0.019) one answer drew on, for one point less saving. One question hit the free-tier limit and is left out of both columns. Set `CONTEXT_PRUNE_RATIO=0` to always send every chunk.
+
+**The checks can run on a smaller model** (`CHECK_MODEL`). The fact-check and the corrective query rewrite are short, structured tasks: compare a claim with a passage, rephrase a query. They are most of v3's extra *output* tokens, which cost four times as much as input on `gpt-oss-120b`. With `CHECK_MODEL=openai/gpt-oss-20b` they cost about half as much, and on Groq's free tier they draw on that model's separate daily quota. Answers are still written by `LLM_MODEL`. Each call is priced at its own model's rate (`CHECK_PRICE_INPUT_PER_M`, `CHECK_PRICE_OUTPUT_PER_M`). The check model has not been graded yet: run `python evals/run_evals.py --answers --levels v3` with it set and compare the claims-verified figure before relying on it.
+
+**More repeated questions hit the cache.** The cache key ignores case, punctuation, articles and was/were, so "What were total net sales in 2024?" and "what was total net sales in 2024" share one answer. Every other word still counts, including years, numbers, *not*, *maximum* and *minimum*, and question words. Similarity matching was tested and rejected: with the embedding model, "net sales in 2024" and "net sales in 2023" are 0.977 similar, more than many true paraphrases, so a similarity cache would return the wrong year's answer.
+
 **Turning the answer checks off** should bring the token count back near v2's while keeping the better retrieval (not separately measured). The retrieval improvements are free per question; the answer checks are what cost tokens. In Settings, each user can turn off **Verify answers** and **Re-search weak results**, and switch on **Agent tools** only when needed.
 
 ## The controls
@@ -33,6 +55,8 @@ Two earlier savings still hold:
 | Setting | Default | Effect |
 |---|---|---|
 | Answer cache | `ANSWER_CACHE_TTL=3600`, `ANSWER_CACHE_SIZE=256` | A repeated question is answered with no embedding, search or LLM call. Entries are keyed on the question, settings, conversation history and index version, so any upload or delete invalidates them all. A cached answer can never cite a stale document. |
+| Context pruning | `CONTEXT_PRUNE_RATIO=0.01` | Leaves out chunks scoring below 1% of the best one, when the best is strong. −16% prompt tokens, no answer lost. |
+| Check model | `CHECK_MODEL` (empty) | A smaller model for fact-checks and query rewrites, for example `openai/gpt-oss-20b`. Grade it first. |
 | Context budget | `MAX_CONTEXT_CHARS=8000` | The lowest-ranked chunks are dropped once the context would exceed this. It caps the prompt even when someone sets 15 sources. |
 | Output budget | `MAX_OUTPUT_TOKENS=1024` | Hard ceiling on completion tokens, reasoning included. |
 | Reasoning effort | `LLM_REASONING_EFFORT=low` | For `gpt-oss` models. Raise it only if your evaluation shows a gain. |

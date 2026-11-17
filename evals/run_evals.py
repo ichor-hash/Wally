@@ -265,20 +265,22 @@ def evaluate_answers(golden, indexes, reranker, levels, pause: float, only=None,
     `previous` (the last report's answers), so a fix to a few cases can be re-measured
     without spending a full run's tokens. The run log says which cases were re-graded.
     """
-    from llm import llm_from_env
+    from llm import get_llm_provider, llm_from_env
 
     llm = PatientLLM(llm_from_env())
+    check_model = os.getenv("CHECK_MODEL", "").strip()
+    check_llm = PatientLLM(get_llm_provider(os.getenv("LLM_PROVIDER", "groq").strip().lower(), model=check_model)) if check_model else None
     config = AnswerConfig(
         company_name=os.getenv("COMPANY_NAME", "Apple Inc."), company_profile=os.getenv("COMPANY_PROFILE", ""),
         max_context_chars=int(os.getenv("MAX_CONTEXT_CHARS", "8000")), max_output_tokens=int(os.getenv("MAX_OUTPUT_TOKENS", "1024")),
-        temperature=0.0,
+        temperature=0.0, prune_ratio=float(os.getenv("CONTEXT_PRUNE_RATIO", "0.01")),
     )
     cases = [c for c in golden["cases"] if "answer" in c and (not only or c["id"] in only)]
     out = {}
     for name in levels:
         config_name, overrides = ANSWER_LEVELS[name]
         strategy, context_mode, _, _ = CONFIGS[config_name]
-        answerer = Answerer(Retriever(indexes[(strategy, context_mode)], reranker), llm, config)
+        answerer = Answerer(Retriever(indexes[(strategy, context_mode)], reranker), llm, config, check_llm=check_llm)
         log("")
         log(f"Answers: {name}  ({ANSWER_LABELS[name]})")
         rows = []
@@ -333,7 +335,7 @@ def evaluate_answers(golden, indexes, reranker, levels, pause: float, only=None,
             log(f"  (re-graded {', '.join(sorted(fresh))}; other cases kept from the previous full run)")
         verified = [r for r in rows if r["verification"] and r["verification"].get("total")]
         out[name] = {
-            "label": ANSWER_LABELS[name], "model": llm.model, "provider": llm.provider_name,
+            "label": ANSWER_LABELS[name], "model": llm.model, "check_model": check_llm.model if check_llm else None, "provider": llm.provider_name,
             "passed": sum(r["passed"] for r in rows), "total": len(rows), "errors": sum(1 for r in rows if r["error"]),
             "by_category": {cat: {"passed": sum(r["passed"] for r in rows if r["category"] == cat),
                                   "total": sum(1 for r in rows if r["category"] == cat)} for cat in dict.fromkeys(r["category"] for r in rows)},

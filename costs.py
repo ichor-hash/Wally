@@ -10,10 +10,34 @@ See docs/COSTS.md.
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from collections import OrderedDict
 from typing import Any, Dict, Optional
+
+
+_WORD = re.compile(r"[\w$%]+(?:[.\-'’/][\w$%]+)*")
+# Words that never change what is being asked. Kept short on purpose: question
+# words (when / where / who), negations, comparatives and every content word stay.
+_FILLER = frozenset("a an the please kindly".split())
+_SAME = {"were": "was", "are": "is", "does": "do", "did": "do"}
+
+
+def normalize_question(text: str) -> str:
+    """
+    Cache key form of a question: case, punctuation, articles and was/were are
+    ignored, word order and every other word count.
+
+        "What were total net sales in 2024?"  ==  "what was total net sales in 2024"
+        "... in 2024"  !=  "... in 2023"       "maximum"  !=  "minimum"
+
+    Embedding similarity is not safe for this: "net sales in 2024" and "in 2023"
+    are 0.977 similar with all-MiniLM-L6-v2, more than many real paraphrases.
+    """
+    text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text.lower())  # 1,500 == 1500
+    words = [_SAME.get(w, w) for w in _WORD.findall(text) if w not in _FILLER]
+    return " ".join(words)
 
 
 class Pricing:

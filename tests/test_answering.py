@@ -242,3 +242,43 @@ def test_index_texts_are_searched_but_text_is_stored():
 def test_cited_line_keeps_the_uncited_line_above_it():
     claims = extract_claims("- Fastest-growing segment in 2025: Japan\n- Growth rate: 15% year-over-year [1].")
     assert len(claims) == 1 and "Japan" in claims[0]["text"] and "15%" in claims[0]["text"]
+
+
+# ---------------------------------------------------------------- cost controls
+def _ranked(*scores):
+    return [{"id": i, "rerank_score": s, "payload": {"text": f"chunk {i}"}} for i, s in enumerate(scores)]
+
+
+def test_prune_context_drops_near_irrelevant_chunks_only_when_evidence_is_strong():
+    from pipeline import prune_context
+    assert [r["id"] for r in prune_context(_ranked(0.99, 0.5, 0.03, 0.001, 0.0), 0.02)] == [0, 1, 2]
+    # always keeps the best two, even when the second is weak
+    assert [r["id"] for r in prune_context(_ranked(0.99, 0.0001, 0.0), 0.02)] == [0, 1]
+    # weak evidence: the reranker is unsure, so everything is sent
+    assert len(prune_context(_ranked(0.005, 0.004, 0.0, 0.0), 0.02)) == 4
+    # off, or no rerank scores
+    assert len(prune_context(_ranked(0.99, 0.0, 0.0), 0)) == 3
+    assert len(prune_context([{"id": 1, "rerank_score": None}, {"id": 2}, {"id": 3}], 0.02)) == 3
+
+
+def test_checks_run_on_the_check_model_and_are_priced_at_its_rate(answerer_factory):
+    from costs import Pricing
+    main = ScriptedLLM(replies=["Japan sold 28,703 [1]."])
+    checker = ScriptedLLM(replies=[json.dumps({"claims": [{"id": 1, "verdict": "SUPPORTED", "reason": "stated"}]})])
+    base = answerer_factory(main)
+    answerer = Answerer(base.retriever, main, base.config, Pricing(1.0, 2.0), check_llm=checker, check_pricing=Pricing(0.1, 0.2))
+    result = answerer.answer("japan sales", AnswerOptions(rerank=False, correct=False))
+    assert [k for k, _ in main.calls] == ["stream"] and [k for k, _ in checker.calls] == ["chat"]
+    assert result["verification"]["supported"] == 1
+    # answer: 100 in + 20 out at $1/$2 per M; check: 10 in + 5 out at $0.1/$0.2 per M
+    assert result["metrics"]["cost_usd"] == pytest.approx((100 * 1 + 20 * 2 + 10 * 0.1 + 5 * 0.2) / 1e6)
+
+
+def test_normalized_question_keeps_meaning_changes_apart():
+    from costs import normalize_question as n
+    assert n("What were total net sales in 2024?") == n("what was total net sales in 2024")
+    assert n("Is the $1,500 limit per trip?") == n("is $1500 limit per trip")
+    assert n("Net sales in 2024?") != n("Net sales in 2023?")
+    assert n("When is it due?") != n("Where is it due?")
+    assert n("Can I work abroad?") != n("Can I not work abroad?")
+    assert n("maximum meal allowance") != n("minimum meal allowance")

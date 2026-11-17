@@ -129,3 +129,30 @@ def trim_to_budget(results: List[Dict[str, Any]], max_chars: int) -> List[Dict[s
         kept.append(r)
         used += size
     return kept
+
+
+PRUNE_MIN_KEEP = 2
+
+
+def prune_context(results: List[Dict[str, Any]], ratio: float, min_keep: int = PRUNE_MIN_KEEP) -> List[Dict[str, Any]]:
+    """
+    Leave out reranked chunks that are near-irrelevant next to the best one.
+
+    A cross-encoder score is close to a probability of relevance. When the best
+    chunk scores 0.99 and the fifth 0.0003, the fifth only costs tokens: sending
+    it to the model (and to the fact-check) cannot help the answer. Chunks below
+    `ratio` x the best score are dropped, keeping at least `min_keep`.
+
+    Only applied when the best evidence is strong. With weak scores the reranker
+    is unsure (on the golden set, a 0.000-scored chunk is sometimes the right
+    one), so every chunk is sent. On evals/golden.json, ratio 0.01 sends 19%
+    fewer context characters and drops no chunk that a question needs; 0.02
+    saves only one point more and starts cutting a 0.019-scored chunk that one
+    answer used.
+    """
+    if ratio <= 0 or len(results) <= min_keep or results[0].get("rerank_score") is None:
+        return results
+    best = max(r["rerank_score"] for r in results)
+    if best < WEAK_RERANK:
+        return results
+    return [r for i, r in enumerate(results) if i < min_keep or r["rerank_score"] >= best * ratio]

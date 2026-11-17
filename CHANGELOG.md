@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased: lower cost per answer
+
+### Added
+- **Context pruning.** After reranking, chunks scoring below 1% of the best one are not sent to the model, when the best is strong (`CONTEXT_PRUNE_RATIO`). −16% prompt tokens on the graded questions, with no answer lost.
+- **`CHECK_MODEL`.** Runs the fact-check and the corrective query rewrite on a smaller model. Each call is priced at its own model's rate.
+
+### Changed
+- The answer cache ignores case, punctuation, articles and was/were when matching questions.
+- `cost_usd` is summed per call, so mixed-model answers are priced correctly.
+
 ## v3.1.0: self-checking answers
 
 ### Added
