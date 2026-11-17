@@ -15,7 +15,7 @@ Every step is timed and costed, and the whole pipeline is graded on a fixed ques
 
 ![Ethan's agent calculating a share, with the step shown under the answer](docs/screenshots/06-agent-tools.png)
 
-**Guides:** [Evaluation](docs/EVALUATION.md) · [Hosting](docs/HOSTING.md) · [Costs](docs/COSTS.md) · [Runbook](docs/RUNBOOK.md) · [Demo script](docs/DEMO_GUIDE.md) · [Changelog](CHANGELOG.md)
+**Guides:** [Evaluation](docs/EVALUATION.md) · [Hosting](docs/HOSTING.md) · [Costs](docs/COSTS.md) · [Runbook](docs/RUNBOOK.md) · [Demo script](docs/DEMO_GUIDE.md) · [Roadmap](docs/FUTURE.md) · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -31,6 +31,7 @@ Every step is timed and costed, and the whole pipeline is graded on a fixed ques
 8. [Project structure](#project-structure)
 9. [Design decisions](#design-decisions)
 10. [Limitations](#limitations)
+11. [Roadmap: an audited System 1](#roadmap-an-audited-system-1)
 
 ---
 
@@ -303,3 +304,17 @@ POST /search
 | Scanned PDFs have no text | OCR on ingestion |
 | English-only embedding model | Multilingual embeddings such as `bge-m3` |
 | Telemetry and cache live in one process | Postgres or Redis for multi-replica deployments |
+
+## Roadmap: an audited System 1
+
+The LLM is called for four jobs, and only one of them, writing the answer, needs a generative model. The other three are decisions: "is this evidence enough?", "does this passage support this claim?".
+
+The planned next architecture puts a fast, non-generative **System 1** in front of the LLM for those decisions:
+
+- an exact-key claim ledger;
+- a deterministic numbers-and-terms check;
+- a local NLI verifier, optionally TypeSafe's Jev.
+
+Only the claims System 1 can't settle go to the LLM. A small random audit stream keeps an unbiased, human-anchored error estimate. When a document changes, only the decisions that touch changed chunks are re-certified, and past answers that cited them are flagged as outdated.
+
+The design came out of a research round and a three-judge review covering novelty, engineering and statistics. That review is written up in [docs/FUTURE.md](docs/FUTURE.md), including what is new, what is prior work, the sample sizes needed, and the phased build plan.
